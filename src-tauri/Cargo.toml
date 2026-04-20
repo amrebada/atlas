@@ -22,7 +22,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # Run with: `cargo run --features perf-tools --bin perf-check`.
 [[bin]]
 name = "perf-check"
-path = "src/bin/perf_check.rs"
+path = "tools/perf_check.rs"
 required-features = ["perf-tools"]
 
 [features]

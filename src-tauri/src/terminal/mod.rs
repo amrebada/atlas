@@ -389,17 +389,22 @@ impl TerminalManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::path::PathBuf;
+    #[cfg(unix)]
     use std::sync::Mutex as StdMutex;
+    #[cfg(unix)]
     use std::time::Duration;
 
     /// Test emitter that stashes every chunk + exit code it sees so the
+    #[cfg(unix)]
     #[derive(Default)]
     struct RecordingEmitter {
         chunks: StdMutex<Vec<u8>>,
         exits: StdMutex<Vec<Option<i32>>>,
     }
 
+    #[cfg(unix)]
     impl TerminalEmitter for RecordingEmitter {
         fn emit_data(&self, _pane_id: &str, chunk: &[u8]) {
             if let Ok(mut b) = self.chunks.lock() {
@@ -413,6 +418,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn tempdir(prefix: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
         let ns = std::time::SystemTime::now()
