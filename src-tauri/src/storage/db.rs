@@ -72,7 +72,7 @@ impl Db {
     pub async fn list_projects(&self, filter: ProjectFilter) -> anyhow::Result<Vec<Project>> {
         let mut sql = String::from(
             "SELECT id, name, path, language, color, branch, \
-                    dirty, ahead, behind, loc, size_bytes, last_opened, \
+                    dirty, ahead, behind, loc, size_bytes, disk_bytes, last_opened, \
                     pinned, archived, todos_count, notes_count, time_tracked, author \
              FROM projects WHERE 1=1",
         );
@@ -120,7 +120,7 @@ impl Db {
     pub async fn get_project(&self, id: &str) -> anyhow::Result<Option<Project>> {
         let row = sqlx::query(
             "SELECT id, name, path, language, color, branch, \
-                    dirty, ahead, behind, loc, size_bytes, last_opened, \
+                    dirty, ahead, behind, loc, size_bytes, disk_bytes, last_opened, \
                     pinned, archived, todos_count, notes_count, time_tracked, author \
              FROM projects WHERE id = ?",
         )
@@ -155,7 +155,7 @@ impl Db {
 
         let rows = sqlx::query(
             "SELECT p.id, p.name, p.path, p.language, p.color, p.branch, \
-                    p.dirty, p.ahead, p.behind, p.loc, p.size_bytes, p.last_opened, \
+                    p.dirty, p.ahead, p.behind, p.loc, p.size_bytes, p.disk_bytes, p.last_opened, \
                     p.pinned, p.archived, p.todos_count, p.notes_count, p.time_tracked, p.author \
              FROM projects p \
              JOIN projects_fts f ON f.rowid = p.rowid \
@@ -472,12 +472,15 @@ impl Db {
                 .map(|mins| (chrono::Utc::now() - chrono::Duration::minutes(mins)).to_rfc3339());
             let lang_str = lang_to_str(&p.language);
 
+            // Fixture rows seed `disk_bytes = size_bytes` as a placeholder;
+            // the first real metrics sweep overwrites with the actual
+            // on-disk total.
             sqlx::query(
                 "INSERT INTO projects (id, name, path, language, color, branch, \
-                                       dirty, ahead, behind, loc, size_bytes, last_opened, \
+                                       dirty, ahead, behind, loc, size_bytes, disk_bytes, last_opened, \
                                        pinned, archived, todos_count, notes_count, \
                                        time_tracked, updated_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(p.id)
             .bind(p.name)
@@ -489,6 +492,7 @@ impl Db {
             .bind(p.ahead)
             .bind(p.behind)
             .bind(p.loc)
+            .bind(p.size_bytes)
             .bind(p.size_bytes)
             .bind(last_opened)
             .bind(p.pinned as i64)
@@ -536,6 +540,7 @@ impl Db {
     async fn hydrate_project(&self, row: sqlx::sqlite::SqliteRow) -> anyhow::Result<Project> {
         let id: String = row.try_get("id")?;
         let size_bytes: i64 = row.try_get("size_bytes")?;
+        let disk_bytes: i64 = row.try_get("disk_bytes").unwrap_or(0);
 
         // tags for this project
         let tag_rows = sqlx::query("SELECT tag FROM tags WHERE project_id = ? ORDER BY tag")
@@ -582,6 +587,8 @@ impl Db {
             loc: row.try_get("loc")?,
             size: format_size(size_bytes),
             size_bytes,
+            disk_size: format_size(disk_bytes),
+            disk_bytes,
             last_opened: row.try_get("last_opened").ok(),
             pinned: pinned_i != 0,
             tags,
@@ -713,10 +720,10 @@ impl Db {
         // Upsert the project row. On conflict we refresh the volatile
         sqlx::query(
             "INSERT INTO projects (id, name, path, language, color, branch, \
-                                   dirty, ahead, behind, loc, size_bytes, last_opened, \
+                                   dirty, ahead, behind, loc, size_bytes, disk_bytes, last_opened, \
                                    pinned, archived, todos_count, notes_count, \
                                    time_tracked, updated_at, discovered_at, source) \
-             VALUES (?, ?, ?, ?, ?, '', 0, 0, 0, 0, 0, NULL, 0, 0, 0, 0, '', ?, ?, 'discovery') \
+             VALUES (?, ?, ?, ?, ?, '', 0, 0, 0, 0, 0, 0, NULL, 0, 0, 0, 0, '', ?, ?, 'discovery') \
              ON CONFLICT(id) DO UPDATE SET \
                  name       = excluded.name, \
                  path       = excluded.path, \
@@ -787,15 +794,18 @@ impl Db {
             .await
             .map_err(|e| anyhow::anyhow!("join blocking metrics: {e}"))??;
 
-        // NOTE: The `projects` table has `loc` and `size_bytes` columns
+        // NOTE: The `projects` table carries both `size_bytes` (source,
+        // gitignored) and `disk_bytes` (full tree). Both are refreshed
+        // together so the UI never shows a stale pair.
         let now = chrono::Utc::now().to_rfc3339();
         sqlx::query(
             "UPDATE projects \
-                SET loc = ?, size_bytes = ?, updated_at = ? \
+                SET loc = ?, size_bytes = ?, disk_bytes = ?, updated_at = ? \
               WHERE id = ?",
         )
         .bind(metrics.loc as i64)
         .bind(metrics.size_bytes as i64)
+        .bind(metrics.disk_bytes as i64)
         .bind(now)
         .bind(project_id)
         .execute(&self.pool)
@@ -1354,7 +1364,7 @@ impl Db {
     ) -> anyhow::Result<Vec<Project>> {
         let rows = sqlx::query(
             "SELECT p.id, p.name, p.path, p.language, p.color, p.branch, \
-                    p.dirty, p.ahead, p.behind, p.loc, p.size_bytes, p.last_opened, \
+                    p.dirty, p.ahead, p.behind, p.loc, p.size_bytes, p.disk_bytes, p.last_opened, \
                     p.pinned, p.archived, p.todos_count, p.notes_count, p.time_tracked, p.author \
              FROM projects p \
              JOIN collection_members m ON m.project_id = p.id \
@@ -1673,7 +1683,7 @@ impl Db {
         // --- Projects (sorted by bm25 ascending) ---
         let project_rows = sqlx::query(
             "SELECT p.id, p.name, p.path, p.language, p.color, p.branch, \
-                    p.dirty, p.ahead, p.behind, p.loc, p.size_bytes, p.last_opened, \
+                    p.dirty, p.ahead, p.behind, p.loc, p.size_bytes, p.disk_bytes, p.last_opened, \
                     p.pinned, p.archived, p.todos_count, p.notes_count, p.time_tracked, p.author, \
                     bm25(projects_fts) AS score \
              FROM projects p \
@@ -2580,6 +2590,7 @@ mod tests {
             group: ScriptGroup::Run,
             default: Some(true),
             icon: None,
+            env_defaults: Vec::new(),
         };
         db.scripts_upsert(&pid, &s1).await?;
 
@@ -2611,6 +2622,7 @@ mod tests {
             group: ScriptGroup::Build,
             default: None,
             icon: None,
+            env_defaults: Vec::new(),
         };
         db.scripts_upsert(&pid, &s2).await?;
         assert_eq!(db.scripts_list(&pid).await?.len(), 2);

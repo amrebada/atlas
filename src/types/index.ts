@@ -65,9 +65,13 @@ export interface Project {
   author?: string | null;
   /** Cached LOC (periodic tokei scan). */
   loc: number;
-  /** Pretty-printed size (e.g. "412 MB"). */
+  /** Pretty-printed source size (e.g. "412 MB"). Respects .gitignore. */
   size: string;
   sizeBytes: number;
+  /** Pretty-printed on-disk size (e.g. "16.4 GB"). Full tree, no .gitignore. */
+  diskSize: string;
+  /** Full on-disk footprint in bytes. Always >= sizeBytes. */
+  diskBytes: number;
   /** ISO-8601 timestamp, or null if never opened. */
   lastOpened: string | null;
   pinned: boolean;
@@ -110,6 +114,11 @@ export interface Note {
   updatedAt: string;
 }
 
+export interface ScriptEnvVar {
+  key: string;
+  default: string;
+}
+
 export interface Script {
   id: ScriptId;
   name: string;
@@ -118,6 +127,10 @@ export interface Script {
   group: ScriptGroup;
   default?: boolean;
   icon?: string;
+  /** Env vars the user defined alongside this script. Defaults are
+   * applied automatically on plain "run"; the run-env modal lets the
+   * user override them per-invocation before launch. */
+  env_defaults?: ScriptEnvVar[];
 }
 
 export interface Session {

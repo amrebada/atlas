@@ -288,12 +288,12 @@ mod tests {
         // Row A - source='discovery', path doesn't exist ⇒ should drop.
         sqlx::query(
             "INSERT INTO projects (id, name, path, language, color, branch, \
-                                   dirty, ahead, behind, loc, size_bytes, \
+                                   dirty, ahead, behind, loc, size_bytes, disk_bytes, \
                                    last_opened, pinned, archived, todos_count, \
                                    notes_count, time_tracked, updated_at, \
                                    discovered_at, source) \
              VALUES ('a', 'A', '/tmp/atlas-test-vanished-a', 'Rust', '#fff', '', \
-                     0, 0, 0, 0, 0, NULL, 0, 0, 0, 0, '', ?, ?, 'discovery')",
+                     0, 0, 0, 0, 0, 0, NULL, 0, 0, 0, 0, '', ?, ?, 'discovery')",
         )
         .bind(&now)
         .bind(&now)
@@ -303,12 +303,12 @@ mod tests {
         // Row B - source='manual', path doesn't exist ⇒ should survive.
         sqlx::query(
             "INSERT INTO projects (id, name, path, language, color, branch, \
-                                   dirty, ahead, behind, loc, size_bytes, \
+                                   dirty, ahead, behind, loc, size_bytes, disk_bytes, \
                                    last_opened, pinned, archived, todos_count, \
                                    notes_count, time_tracked, updated_at, \
                                    discovered_at, source) \
              VALUES ('b', 'B', '/tmp/atlas-test-vanished-b', 'Rust', '#fff', '', \
-                     0, 0, 0, 0, 0, NULL, 0, 0, 0, 0, '', ?, ?, 'manual')",
+                     0, 0, 0, 0, 0, 0, NULL, 0, 0, 0, 0, '', ?, ?, 'manual')",
         )
         .bind(&now)
         .bind(&now)
@@ -330,8 +330,8 @@ mod tests {
     async fn current_version_returns_highest_applied() -> anyhow::Result<()> {
         let db = Db::open_in_memory().await?;
         let v = db.current_version().await?;
-        // Migrations present: 0001, 0002, 0004, 0005.
-        assert_eq!(v, Some(5));
+        // Migrations present: 0001, 0002, 0004, 0005, 0006.
+        assert_eq!(v, Some(6));
         Ok(())
     }
 

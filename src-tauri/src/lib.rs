@@ -12,6 +12,7 @@ mod editors;
 mod events;
 mod git;
 mod metrics;
+mod path_bootstrap;
 mod scripts;
 mod sessions;
 pub mod storage;
@@ -36,6 +37,11 @@ pub fn run() {
                 .unwrap_or_else(|_| EnvFilter::new("info,atlas_lib=debug")),
         )
         .init();
+
+    // Run BEFORE any PTY / child spawn so every descendant inherits the
+    // real login-shell PATH. Safe to call on every platform; no-op
+    // outside macOS.
+    path_bootstrap::bootstrap();
 
     tauri::Builder::default()
         // Decorum must be registered BEFORE other plugins that touch the
@@ -162,6 +168,7 @@ pub fn run() {
             commands::scripts::scripts_upsert,
             commands::scripts::scripts_delete,
             commands::scripts::scripts_run,
+            commands::scripts::scripts_run_with_env,
             commands::files::files_list,
             commands::todos::todos_list,
             commands::todos::todos_upsert,

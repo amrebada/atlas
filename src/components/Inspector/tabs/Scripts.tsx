@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent,
+  type ChangeEvent,
+} from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "../../Icon";
 import { TabEmpty, TabError, TabSkeleton } from "../TabStates";
@@ -7,12 +14,18 @@ import {
   deleteScript as ipcDeleteScript,
   listScripts,
   scriptsRun,
+  scriptsRunWithEnv,
   upsertScript,
 } from "../../../ipc";
 import { newScriptId } from "../../../features/inspector/ids";
 import { spawnScriptPane } from "../../../features/terminal/TerminalStrip";
 import { useTerminalStore, makePane } from "../../../features/terminal/layout";
-import type { Project, Script, ScriptGroup } from "../../../types";
+import type {
+  Project,
+  Script,
+  ScriptEnvVar,
+  ScriptGroup,
+} from "../../../types";
 
 // Atlas - Inspector / Scripts tab.
 
@@ -31,9 +44,10 @@ interface Draft {
   name: string;
   cmd: string;
   group: ScriptGroup;
+  envDefaults: ScriptEnvVar[];
 }
 
-const EMPTY_DRAFT: Draft = { name: "", cmd: "", group: "run" };
+const EMPTY_DRAFT: Draft = { name: "", cmd: "", group: "run", envDefaults: [] };
 
 export function Scripts({ project }: ScriptsProps) {
   const queryClient = useQueryClient();
@@ -47,11 +61,14 @@ export function Scripts({ project }: ScriptsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  // The script whose env the user is currently editing before launch.
+  const [runEnvFor, setRunEnvFor] = useState<Script | null>(null);
 
   useEffect(() => {
     setEditingId(null);
     setDraft(EMPTY_DRAFT);
     setSelected(new Set());
+    setRunEnvFor(null);
   }, [project.id]);
 
   const { data, isLoading, error, refetch } = useQuery<Script[]>({
@@ -175,6 +192,45 @@ export function Scripts({ project }: ScriptsProps) {
     }
   };
 
+  // Launch a single script with user-supplied env overrides (from the
+  // run-env modal). Uses the dedicated IPC so the backend can map
+  // `[script_id, env]` tuples onto `scripts::runner::run` per invocation.
+  const runWithEnv = async (
+    script: Script,
+    env: Array<[string, string]>,
+  ) => {
+    let paneIds: string[] | null = null;
+    try {
+      paneIds = await scriptsRunWithEnv(project.id, [
+        { scriptId: script.id, env },
+      ]);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[atlas] scripts_run_with_env failed:", err);
+      pushToast(
+        "error",
+        `scripts_run_with_env failed: ${String(err)}`,
+      );
+      return;
+    }
+    const paneId = paneIds?.[0];
+    if (!paneId) {
+      pushToast("warn", "Script didn't return a pane id");
+      return;
+    }
+    useTerminalStore.getState().addPane(
+      makePane(paneId, "script", project.path, script.name, {
+        scriptId: script.id,
+        status: "running",
+        branch: project.branch,
+        projectId: project.id,
+        projectLabel: project.name,
+        command: "sh",
+        args: ["-lc", script.cmd],
+      }),
+    );
+  };
+
   const runSelected = () => {
     const arr = scripts.filter((s) => selected.has(s.id));
     if (arr.length === 0) return;
@@ -182,14 +238,28 @@ export function Scripts({ project }: ScriptsProps) {
     clearSelection();
   };
   const runAll = () => void runScripts(scripts);
-  const runOne = (s: Script) => void runScripts([s]);
+  // Run a single script. If it declares env defaults, surface the modal
+  // so the user can edit values before launch; otherwise run straight
+  // through with the stored defaults already applied by the backend.
+  const runOne = (s: Script) => {
+    if ((s.env_defaults ?? []).length > 0) {
+      setRunEnvFor(s);
+      return;
+    }
+    void runScripts([s]);
+  };
 
   const beginAdd = () => {
     setDraft(EMPTY_DRAFT);
     setEditingId("__new");
   };
   const beginEdit = (s: Script) => {
-    setDraft({ name: s.name, cmd: s.cmd, group: s.group });
+    setDraft({
+      name: s.name,
+      cmd: s.cmd,
+      group: s.group,
+      envDefaults: (s.env_defaults ?? []).map((v) => ({ ...v })),
+    });
     setEditingId(s.id);
   };
   const cancel = () => {
@@ -203,17 +273,28 @@ export function Scripts({ project }: ScriptsProps) {
       cancel();
       return;
     }
+    // Drop empty-key rows; keep order so the modal renders them as typed.
+    const envDefaults = draft.envDefaults
+      .map((v) => ({ key: v.key.trim(), default: v.default }))
+      .filter((v) => v.key.length > 0);
     if (editingId === "__new") {
       upsert.mutate({
         id: newScriptId(name),
         name,
         cmd,
         group: draft.group,
+        env_defaults: envDefaults,
       });
     } else if (editingId) {
       const target = scripts.find((s) => s.id === editingId);
       if (target) {
-        upsert.mutate({ ...target, name, cmd, group: draft.group });
+        upsert.mutate({
+          ...target,
+          name,
+          cmd,
+          group: draft.group,
+          env_defaults: envDefaults,
+        });
       }
     }
     cancel();
@@ -351,6 +432,18 @@ export function Scripts({ project }: ScriptsProps) {
           </div>
         );
       })}
+
+      {runEnvFor && (
+        <RunEnvModal
+          script={runEnvFor}
+          onCancel={() => setRunEnvFor(null)}
+          onContinue={(env) => {
+            const target = runEnvFor;
+            setRunEnvFor(null);
+            void runWithEnv(target, env);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -465,7 +558,15 @@ function ScriptEditor({
   onSave: () => void;
   onCancel: () => void;
 }) {
-  const onKey = (e: KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
+  // `cmd` accepts both a single-line invocation ("pnpm dev") and a
+  // pasted multi-line bash script — the textarea grows to fit.
+  const [pasteMode, setPasteMode] = useState<boolean>(() =>
+    draft.cmd.includes("\n"),
+  );
+
+  const onKey = (
+    e: KeyboardEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
     if (e.key === "Enter") {
       e.preventDefault();
       onSave();
@@ -474,6 +575,53 @@ function ScriptEditor({
       onCancel();
     }
   };
+  const onCmdKey = (
+    e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    // In paste mode Enter inserts a newline; Cmd/Ctrl+Enter saves.
+    if (e.key === "Enter" && !pasteMode) {
+      e.preventDefault();
+      onSave();
+    } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      onSave();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onCancel();
+    }
+  };
+
+  const onCmdPaste = (e: ChangeEvent<HTMLInputElement>) => {
+    // Auto-promote to paste mode the moment the user pastes something
+    // that clearly isn't a single-line cmd (has a newline or leading #!).
+    const v = e.target.value;
+    if (!pasteMode && (v.includes("\n") || v.startsWith("#!"))) {
+      setPasteMode(true);
+    }
+    onDraftChange({ ...draft, cmd: v });
+  };
+
+  const addEnv = () =>
+    onDraftChange({
+      ...draft,
+      envDefaults: [...draft.envDefaults, { key: "", default: "" }],
+    });
+  const updateEnv = (i: number, patch: Partial<ScriptEnvVar>) => {
+    const next = draft.envDefaults.slice();
+    next[i] = { ...next[i], ...patch };
+    onDraftChange({ ...draft, envDefaults: next });
+  };
+  const removeEnv = (i: number) => {
+    const next = draft.envDefaults.slice();
+    next.splice(i, 1);
+    onDraftChange({ ...draft, envDefaults: next });
+  };
+
+  const cmdRows = Math.min(
+    12,
+    Math.max(3, draft.cmd.split("\n").length + 1),
+  );
+
   return (
     <div className="p-[10px] mb-[3px] rounded-[4px] bg-surface border border-accent">
       <div className="flex gap-[6px] mb-[6px]">
@@ -499,13 +647,91 @@ function ScriptEditor({
           <option value="util">util</option>
         </select>
       </div>
-      <input
-        value={draft.cmd}
-        onChange={(e) => onDraftChange({ ...draft, cmd: e.target.value })}
-        onKeyDown={onKey}
-        placeholder="command (e.g. pnpm dev)"
-        className="w-full bg-bg border border-line rounded-[3px] px-[8px] py-[5px] mb-[8px] outline-none text-text font-mono text-[11px]"
-      />
+
+      <div className="flex items-center justify-between mb-[4px]">
+        <span className="font-mono text-[9px] text-text-dimmer uppercase tracking-[0.8px]">
+          command
+        </span>
+        <button
+          type="button"
+          onClick={() => setPasteMode((v) => !v)}
+          title={
+            pasteMode
+              ? "Switch to single-line input"
+              : "Paste a multi-line bash script"
+          }
+          className="inline-flex items-center gap-[4px] px-[6px] py-[2px] font-mono text-[9px] text-text-dim border border-line rounded-[3px] hover:text-text"
+        >
+          {pasteMode ? "single-line" : "paste script"}
+        </button>
+      </div>
+      {pasteMode ? (
+        <textarea
+          value={draft.cmd}
+          onChange={(e) => onDraftChange({ ...draft, cmd: e.target.value })}
+          onKeyDown={onCmdKey}
+          placeholder={"#!/usr/bin/env bash\nset -euo pipefail\n..."}
+          rows={cmdRows}
+          className="w-full resize-y bg-bg border border-line rounded-[3px] px-[8px] py-[5px] mb-[8px] outline-none text-text font-mono text-[11px] leading-[1.4]"
+        />
+      ) : (
+        <input
+          value={draft.cmd}
+          onChange={onCmdPaste}
+          onKeyDown={onCmdKey}
+          placeholder="command (e.g. pnpm dev)"
+          className="w-full bg-bg border border-line rounded-[3px] px-[8px] py-[5px] mb-[8px] outline-none text-text font-mono text-[11px]"
+        />
+      )}
+
+      <div className="flex items-center justify-between mb-[4px]">
+        <span className="font-mono text-[9px] text-text-dimmer uppercase tracking-[0.8px]">
+          env vars
+          {draft.envDefaults.length > 0
+            ? ` · ${draft.envDefaults.length}`
+            : ""}
+        </span>
+        <button
+          type="button"
+          onClick={addEnv}
+          title="Add env var"
+          className="inline-flex items-center gap-[4px] px-[6px] py-[2px] font-mono text-[9px] text-text-dim border border-line rounded-[3px] hover:text-text"
+        >
+          <Icon name="plus" size={8} stroke="currentColor" />
+          add
+        </button>
+      </div>
+      {draft.envDefaults.length > 0 && (
+        <div className="mb-[8px] flex flex-col gap-[4px]">
+          {draft.envDefaults.map((v, i) => (
+            <div key={i} className="flex gap-[4px] items-center">
+              <input
+                value={v.key}
+                onChange={(e) => updateEnv(i, { key: e.target.value })}
+                placeholder="KEY"
+                className="w-[40%] min-w-0 bg-bg border border-line rounded-[3px] px-[8px] py-[4px] outline-none text-text font-mono text-[11px] uppercase"
+              />
+              <span className="font-mono text-[11px] text-text-dimmer">=</span>
+              <input
+                value={v.default}
+                onChange={(e) => updateEnv(i, { default: e.target.value })}
+                placeholder="default"
+                className="flex-1 min-w-0 bg-bg border border-line rounded-[3px] px-[8px] py-[4px] outline-none text-text font-mono text-[11px]"
+              />
+              <button
+                type="button"
+                onClick={() => removeEnv(i)}
+                title="Remove"
+                aria-label={`Remove env var ${v.key || "row"}`}
+                className="w-[22px] h-[22px] inline-flex items-center justify-center bg-transparent border border-line rounded-[3px] text-text-dim flex-shrink-0"
+              >
+                <Icon name="trash" size={10} stroke="currentColor" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex gap-[6px] justify-end">
         <button
           type="button"
@@ -523,5 +749,107 @@ function ScriptEditor({
         </button>
       </div>
     </div>
+  );
+}
+
+function RunEnvModal({
+  script,
+  onContinue,
+  onCancel,
+}: {
+  script: Script;
+  onContinue: (env: Array<[string, string]>) => void;
+  onCancel: () => void;
+}) {
+  const [values, setValues] = useState<string[]>(() =>
+    (script.env_defaults ?? []).map((v) => v.default),
+  );
+  const vars = script.env_defaults ?? [];
+
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      submit();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onCancel();
+    }
+  };
+
+  const submit = () => {
+    const env: Array<[string, string]> = vars.map((v, i) => [
+      v.key,
+      values[i] ?? v.default,
+    ]);
+    onContinue(env);
+  };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.5)" }}
+      onClick={onCancel}
+    >
+      <div
+        className="w-[420px] max-w-[90vw] rounded-[6px] bg-surface border border-line p-[16px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-[6px] mb-[12px]">
+          <Icon name="play" size={12} stroke="var(--accent)" />
+          <span className="text-[13px] font-semibold text-text font-sans">
+            Run {script.name}
+          </span>
+        </div>
+        <div className="font-mono text-[9px] text-text-dimmer uppercase tracking-[0.8px] mb-[8px]">
+          environment
+        </div>
+        <div className="flex flex-col gap-[6px] mb-[14px]">
+          {vars.map((v, i) => (
+            <div key={v.key + i} className="flex items-center gap-[6px]">
+              <span className="w-[32%] min-w-0 font-mono text-[11px] text-text-dim uppercase truncate">
+                {v.key}
+              </span>
+              <span className="font-mono text-[11px] text-text-dimmer">=</span>
+              <input
+                autoFocus={i === 0}
+                value={values[i] ?? ""}
+                onChange={(e) => {
+                  const next = values.slice();
+                  next[i] = e.target.value;
+                  setValues(next);
+                }}
+                onKeyDown={onKey}
+                placeholder={v.default}
+                className="flex-1 min-w-0 bg-bg border border-line rounded-[3px] px-[8px] py-[5px] outline-none text-text font-mono text-[11px]"
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-[6px] justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex items-center px-[10px] py-[4px] font-mono text-[11px] text-text-dim border border-line rounded-[3px]"
+          >
+            cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            title="Run (⌘/Ctrl + Enter)"
+            className="inline-flex items-center gap-[5px] px-[10px] py-[4px] font-mono text-[11px] rounded-[3px] font-semibold"
+            style={{
+              background: "var(--accent)",
+              color: "var(--accent-fg)",
+              border: "none",
+            }}
+          >
+            <Icon name="play" size={9} stroke="var(--accent-fg)" />
+            continue
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

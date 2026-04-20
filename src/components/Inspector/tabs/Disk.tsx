@@ -26,6 +26,18 @@ const SEGMENT_COLORS = [
   "oklch(0.60 0.09 155)",
 ];
 
+function formatExcess(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"] as const;
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
 export function Disk({ project }: DiskProps) {
   const queryClient = useQueryClient();
   const pushToast = useUiStore((s) => s.pushToast);
@@ -65,9 +77,18 @@ export function Disk({ project }: DiskProps) {
     }));
   }, [data]);
 
+  // `project.sizeBytes` is the gitignored (source) total — the disk scan
+  // walks everything. The delta is whatever `.gitignore` hides:
+  // `node_modules`, `target`, build output, caches. Surfacing it here
+  // makes the Disk tab self-explanatory for users coming from the list
+  // who wondered why a "50 MB" project showed 16 GB of disk use.
+  const totalDiskBytes = data?.totalBytes ?? 0;
+  const excessBytes = Math.max(0, totalDiskBytes - project.sizeBytes);
+  const showSplit = !!data && excessBytes > 50 * 1024 * 1024;
+
   return (
     <div className="p-[14px] overflow-y-auto h-full">
-      <div className="flex items-center mb-[12px] gap-2">
+      <div className="flex items-center mb-[4px] gap-2">
         <span className="font-mono text-[10px] text-text-dim uppercase tracking-[0.6px]">
           Disk usage
         </span>
@@ -90,6 +111,22 @@ export function Disk({ project }: DiskProps) {
           {isFetching ? "scanning…" : "rescan"}
         </button>
       </div>
+
+      {showSplit && (
+        <div className="font-mono text-[10px] text-text-dim mb-[12px]">
+          <span className="text-text-dimmer">source</span>{" "}
+          <span className="text-text">{project.size}</span>
+          <span className="text-text-dimmer"> · </span>
+          <span className="text-text-dimmer">gitignored</span>{" "}
+          <span style={{ color: "var(--warn, #d97757)" }}>
+            {formatExcess(excessBytes)}
+          </span>
+          <span className="text-text-dimmer">
+            {" "}(node_modules, build outputs, caches)
+          </span>
+        </div>
+      )}
+      {!showSplit && <div className="mb-[8px]" />}
 
       {/* Stacked bar */}
       {stacked.length > 0 && (

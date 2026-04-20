@@ -106,10 +106,13 @@ pub(crate) async fn spawn_metrics_refresh(db: Db, app: tauri::AppHandle, project
     match db.refresh_project_metrics(&project_id).await {
         Ok(metrics) => {
             let size_str = crate::util::format_bytes(metrics.size_bytes);
+            let disk_str = crate::util::format_bytes(metrics.disk_bytes);
             let patch = serde_json::json!({
                 "loc": metrics.loc,
                 "size": size_str,
                 "sizeBytes": metrics.size_bytes,
+                "diskSize": disk_str,
+                "diskBytes": metrics.disk_bytes,
             });
             if let Err(e) = events::emit_project_updated(&app, &project_id, patch) {
                 tracing::warn!(
@@ -196,8 +199,12 @@ pub struct ProjectMetricsDto {
     pub loc: u64,
     #[ts(type = "number")]
     pub size_bytes: u64,
-    /// Pretty-printed size, e.g. `"412 MB"`. Derived via
+    /// Pretty-printed source size, e.g. `"412 MB"`.
     pub size: String,
+    #[ts(type = "number")]
+    pub disk_bytes: u64,
+    /// Pretty-printed on-disk size, e.g. `"16.4 GB"`.
+    pub disk_size: String,
 }
 
 /// `projects.refresh_metrics(id)` - walk the project's directory with
@@ -215,6 +222,8 @@ pub async fn projects_refresh_metrics(
         loc: metrics.loc,
         size_bytes: metrics.size_bytes,
         size: crate::util::format_bytes(metrics.size_bytes),
+        disk_bytes: metrics.disk_bytes,
+        disk_size: crate::util::format_bytes(metrics.disk_bytes),
     })
 }
 

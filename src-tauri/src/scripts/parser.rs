@@ -54,6 +54,7 @@ pub fn parse_package_json_bytes(bytes: &[u8]) -> Vec<Script> {
             group,
             default: if is_default { Some(true) } else { None },
             icon: Some(icon_for_group(&group_for_name(name)).to_string()),
+            env_defaults: Vec::new(),
         });
     }
 
@@ -123,6 +124,7 @@ pub fn parse_makefile_text(text: &str) -> Vec<Script> {
             group,
             default: if is_default { Some(true) } else { None },
             icon: Some(icon_for_group(&group_for_name(lhs)).to_string()),
+            env_defaults: Vec::new(),
         });
     }
 
@@ -184,6 +186,7 @@ pub fn parse_taskfile_bytes(bytes: &[u8]) -> Vec<Script> {
             group,
             default: if is_default { Some(true) } else { None },
             icon: Some(icon_for_group(&group_for_name(name)).to_string()),
+            env_defaults: Vec::new(),
         });
     }
     out

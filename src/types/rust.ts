@@ -173,7 +173,17 @@ kind: string, title: string, cwd: string, scriptId: string | null, sessionId: st
 
 export type PaneStatus = "idle" | "running" | "active" | "error";
 
-export type Project = { id: string, name: string, path: string, language: Lang, color: string, branch: string, dirty: number, ahead: number, behind: number, loc: number, size: string, sizeBytes: number, lastOpened: string | null, pinned: boolean, tags: Array<string>, todosCount: number, notesCount: number, time: string, archived: boolean, collectionIds: Array<string>, 
+export type Project = { id: string, name: string, path: string, language: Lang, color: string, branch: string, dirty: number, ahead: number, behind: number, loc: number, size: string, sizeBytes: number, 
+/**
+ * Pretty-printed on-disk size, e.g. `"16.4 GB"`. Matches
+ * `disk_bytes` formatting via `util::format_bytes`.
+ */
+diskSize: string, 
+/**
+ * Full on-disk footprint including files `.gitignore` hides
+ * (`node_modules`, build outputs). Always ≥ `size_bytes`.
+ */
+diskBytes: number, lastOpened: string | null, pinned: boolean, tags: Array<string>, todosCount: number, notesCount: number, time: string, archived: boolean, collectionIds: Array<string>, 
 /**
  * Author name of the repo's current HEAD commit, or `None` for
  */
@@ -184,9 +194,13 @@ author: string | null, };
  */
 export type ProjectMetricsDto = { loc: number, sizeBytes: number, 
 /**
- * Pretty-printed size, e.g. `"412 MB"`. Derived via
+ * Pretty-printed source size, e.g. `"412 MB"`.
  */
-size: string, };
+size: string, diskBytes: number, 
+/**
+ * Pretty-printed on-disk size, e.g. `"16.4 GB"`.
+ */
+diskSize: string, };
 
 /**
  * Outcome of a single `projects.repair` invocation. camelCase in the TS
@@ -205,7 +219,9 @@ filesRepaired: number,
  */
 issues: Array<string>, };
 
-export type Script = { id: string, name: string, cmd: string, desc: string | null, group: ScriptGroup, default: boolean | null, icon: string | null, };
+export type Script = { id: string, name: string, cmd: string, desc: string | null, group: ScriptGroup, default: boolean | null, icon: string | null, env_defaults: Array<ScriptEnvVar>, };
+
+export type ScriptEnvVar = { key: string, default: string, };
 
 export type ScriptGroup = "run" | "build" | "check" | "util";
 

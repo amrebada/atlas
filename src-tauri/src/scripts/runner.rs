@@ -9,11 +9,14 @@ use crate::storage::types::{PaneKind, Script};
 use crate::terminal::{OpenRequest, TerminalManager};
 
 /// Spawn `script` inside a PTY pane rooted at `cwd` and return the
+/// resulting pane id. `env` is merged on top of the inherited env: any
+/// pair here overrides the parent process value for this invocation only.
 pub async fn run(
     app: &AppHandle,
     project_id: &str,
     script: &Script,
     cwd: &Path,
+    env: Vec<(String, String)>,
 ) -> anyhow::Result<String> {
     let manager = app
         .try_state::<TerminalManager>()
@@ -23,6 +26,7 @@ pub async fn run(
         project = %project_id,
         script = %script.name,
         cwd = %cwd.display(),
+        env_count = env.len(),
         "spawning script pane"
     );
 
@@ -34,7 +38,7 @@ pub async fn run(
         cwd: cwd.to_path_buf(),
         command: Some(shell),
         args: vec!["-c".to_string(), script.cmd.clone()],
-        env: vec![],
+        env,
         title: Some(script.name.clone()),
         branch: None,
         script_id: Some(script.id.clone()),
