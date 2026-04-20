@@ -1,0 +1,10 @@
+/*
+ * Atlas - App.css
+ *
+ * Intentionally empty. All global styling now lives in:
+ *   - src/ui/tokens.css  (OKLCH variables, fonts, densities)
+ *   - src/ui/global.css  (Tailwind directives + reset)
+ *
+ * Component styling uses Tailwind utility classes. This file is kept as
+ * a placeholder so stale imports do not fail.
+ */

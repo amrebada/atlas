@@ -1,0 +1,308 @@
+/*
+ * Atlas - global stylesheet.
+ *
+ * Order:
+ *   1. Tokens (CSS vars for OKLCH theme + fonts + densities).
+ *   2. Google Fonts for the IBM Plex / Inter / Grotesk / JetBrains sets.
+ *      (Pulled remotely for parity with the prototype; swap for a local
+ *       @fontsource bundle in when offline-first matters.)
+ *   3. Tailwind base / components / utilities.
+ *   4. Small prototype-parity resets (scrollbars, kbd focus outline).
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+@import "./tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* App chrome must not be selectable - feels native. Re-enabled below
+       for real text surfaces (inputs, textareas, contenteditable, code). */
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: default;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  [contenteditable=""],
+  .selectable,
+  .tt-prose,
+  .tt-prose * {
+    -webkit-user-select: text;
+    user-select: text;
+    cursor: text;
+  }
+
+  button {
+    font-family: inherit;
+  }
+
+  /* Blanket focus-visible ring so keyboard-only users can always
+     see where they are. Applied to every element that can receive focus; we
+     intentionally do NOT gate it on specific selectors so custom roles (divs
+     made focusable via tabindex, `role="tab"`, etc.) also benefit. */
+  *:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Kill the user-agent focus ring on inputs / textareas ONLY for keyboard-
+     free focus (e.g. pointer/click) — the `:focus-visible` rule above still
+     paints a ring when the user is tabbing. Components that want a
+     text-field chrome (Notes search, New Project name, etc.) use
+     `focus-within` on the wrapper. */
+  input:focus:not(:focus-visible),
+  textarea:focus:not(:focus-visible),
+  select:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  input::placeholder {
+    color: var(--text-dimmer);
+  }
+
+  /* Prototype-parity scrollbars. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-dimmer);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+}
+
+@layer components {
+  .mac-window {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    position: relative;
+  }
+}
+
+/* Indeterminate progress bar used while the discovery walker can't know
+   its total ("walking" phase). The bar slides left→right across the track. */
+@keyframes atlas-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.animate-indeterminate {
+  animation: atlas-indeterminate 1.4s ease-in-out infinite;
+}
+
+/*
+ * prefers-reduced-motion.
+ *
+ * When the user has asked the OS for reduced motion, we collapse every
+ * animation and transition to a near-zero duration rather than outright
+ * removing them (keeps state-machine semantics - `animationend` still
+ * fires, transitions still snap to their end state). This covers
+ * Tailwind's `animate-pulse`, the indeterminate progress bar, the toast
+ * slide, session status glows, terminal layout animations - all of it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Kill the sidebar / session-card accent glows that rely on a soft
+     shadow — they register as motion for many vestibular users. */
+  .session-card,
+  [data-glow] {
+    box-shadow: none !important;
+  }
+}
+
+/*
+ * Tiptap prose - - Local Projects.html`
+ * (lines 207-280). Applied to the wrapper `<div class="tt-prose">` inside
+ * `NoteEditor`. Scoped by `.ProseMirror` so these rules only touch the
+ * editor surface; nothing leaks into app chrome.
+ */
+.tt-prose .ProseMirror {
+  outline: none;
+  min-height: 360px;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text);
+  font-family: var(--sans);
+}
+.tt-prose .ProseMirror > * + * { margin-top: 0.9em; }
+.tt-prose .ProseMirror h1 {
+  font-size: 28px; font-weight: 700; line-height: 1.25;
+  letter-spacing: -0.3px; margin-top: 1.5em;
+}
+.tt-prose .ProseMirror h2 {
+  font-size: 22px; font-weight: 600; line-height: 1.3;
+  letter-spacing: -0.2px; margin-top: 1.4em;
+}
+.tt-prose .ProseMirror h3 {
+  font-size: 17px; font-weight: 600; line-height: 1.35; margin-top: 1.3em;
+}
+.tt-prose .ProseMirror p { margin: 0; }
+.tt-prose .ProseMirror ul,
+.tt-prose .ProseMirror ol { padding-left: 1.3em; margin: 0.2em 0; }
+.tt-prose .ProseMirror ul li,
+.tt-prose .ProseMirror ol li { margin: 0.2em 0; }
+.tt-prose .ProseMirror blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 14px;
+  color: var(--text-dim);
+  font-style: italic;
+  margin-left: 0;
+}
+.tt-prose .ProseMirror code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text);
+}
+.tt-prose .ProseMirror pre,
+.tt-prose .ProseMirror .tt-codeblock {
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.tt-prose .ProseMirror pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+.tt-prose .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 1.4em 0;
+}
+.tt-prose .ProseMirror a,
+.tt-prose .ProseMirror .tt-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tt-prose .ProseMirror mark,
+.tt-prose .ProseMirror [data-highlight] {
+  background: oklch(0.85 0.16 95 / 0.35);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+[data-theme="light"] .tt-prose .ProseMirror mark {
+  background: oklch(0.9 0.16 95 / 0.6);
+}
+
+.tt-prose .ProseMirror .tt-image,
+.tt-prose .ProseMirror img {
+  max-width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  display: block;
+}
+
+/* tiptap task lists */
+.tt-prose .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.tt-prose .ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  gap: 8px;
+  margin: 0.25em 0;
+}
+.tt-prose .ProseMirror ul[data-type="taskList"] li > label {
+  user-select: none;
+  margin-top: 3px;
+}
+.tt-prose .ProseMirror ul[data-type="taskList"] li > div { flex: 1; }
+.tt-prose .ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+  accent-color: oklch(0.78 0.17 145);
+}
+
+/* tiptap tables */
+.tt-prose .ProseMirror .tt-table,
+.tt-prose .ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  overflow: hidden;
+  width: 100%;
+  table-layout: fixed;
+  font-size: 14px;
+}
+.tt-prose .ProseMirror th,
+.tt-prose .ProseMirror td {
+  border: 1px solid var(--line);
+  padding: 7px 10px;
+  position: relative;
+  vertical-align: top;
+}
+.tt-prose .ProseMirror th {
+  background: var(--surface-2);
+  font-weight: 600;
+  text-align: left;
+}
+.tt-prose .ProseMirror .selectedCell:after {
+  background: oklch(0.78 0.17 145 / 0.12);
+  content: '';
+  left: 0; right: 0; top: 0; bottom: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+.tt-prose .ProseMirror .column-resize-handle {
+  background: var(--accent);
+  bottom: -2px;
+  pointer-events: none;
+  position: absolute;
+  right: -2px;
+  top: 0;
+  width: 2px;
+}
+
+/* placeholder */
+.tt-prose .ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--text-dimmer);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

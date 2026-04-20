@@ -1,0 +1,100 @@
+[package]
+name = "atlas"
+version = "1.0.0"
+description = "Desktop-native command hub for local git projects"
+authors = ["Amr Ebada"]
+license = "MIT"
+repository = "https://github.com/amrebada/atlas"
+edition = "2021"
+# Disambiguate `cargo run` now that the crate ships two bins: the main
+# Tauri app (auto-inferred from `src/main.rs` → `atlas`) and
+# `perf-check` below. Without this, `pnpm tauri dev` (which shells
+# out to `cargo run`) fails with "could not determine which binary to
+# run".
+default-run = "atlas"
+
+[lib]
+name = "atlas_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# P8 performance regression gate — invoked from CI + the release
+# workflow (see docs/RELEASES.md). Cargo otherwise auto-infers the bin
+# as `perf_check`; the explicit [[bin]] lets us keep the kebab-case
+# name that matches the CLI invocation.
+[[bin]]
+name = "perf-check"
+path = "src/bin/perf_check.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri core + plugins
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-decorum = "1"
+tauri-plugin-autostart = "2"
+
+# Serde / JSON / YAML
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yml = "0.0.12"                       # Taskfile.yml parser (script discovery)
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# SQLite (D1)
+sqlx = { version = "0.8", features = [
+    "sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+    "migrate",
+    "chrono",
+] }
+
+# Filesystem watching (P2)
+notify = "6"
+notify-debouncer-full = "0.3"
+
+# Git (P2)
+git2 = { version = "0.19", default-features = false, features = [] }
+
+# PTY (P6)
+portable-pty = "0.8"
+
+# Directory traversal respecting .gitignore (P2/D2)
+ignore = "0.4"
+
+# Parallelism
+rayon = "1"
+
+# Safe file deletion — moves items to the platform trash (macOS "Move to Trash",
+# Linux XDG trash, Windows Recycle Bin) instead of an irreversible unlink.
+trash = "5"
+
+# Cross-platform system info — home-volume disk free/total for the sidebar's
+# "24.3 / 500 GB" row. Disks-only feature-set keeps the dep tiny (no CPU,
+# process, memory, network info pulled in). macOS requires no entitlement
+# for the Disks API.
+sysinfo = { version = "0.38", default-features = false, features = ["disk"] }
+
+# Errors
+anyhow = "1"
+thiserror = "1"
+
+# Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time / IDs
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# TS type generation (D1 uses this)
+ts-rs = "10"
+
+[dev-dependencies]
+tempfile = "3"

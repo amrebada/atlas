@@ -1,0 +1,92 @@
+/*
+ * Atlas - design tokens.
+ *
+ * - Local Projects.html` §THEME TOKENS
+ * (lines 20–60). Keep additions to the hand-off section below.
+ *
+ * Consumed by:
+ *   - Tailwind via `theme.extend.colors` (see `tailwind.config.ts`)
+ *   - Legacy `var(--token)` inline styles (still used by `chrome.jsx` port).
+ *
+ * Themes and fonts switch via data attributes on the root element:
+ *   <html data-theme="dark|light" data-font="plex|inter|grotesk|system" />
+ */
+
+[data-theme="dark"] {
+  --bg: oklch(0.16 0.004 260);
+  --chrome: oklch(0.18 0.004 260);
+  --surface: oklch(0.20 0.004 260);
+  --surface-2: oklch(0.24 0.005 260);
+  --line: oklch(0.28 0.005 260);
+  --line-soft: oklch(0.23 0.004 260);
+  --text: oklch(0.96 0.003 260);
+  --text-dim: oklch(0.64 0.006 260);
+  --text-dimmer: oklch(0.48 0.006 260);
+  --accent: oklch(0.82 0.17 145);
+  --accent-fg: oklch(0.16 0.004 260);
+  --warn: oklch(0.80 0.14 75);
+  --warn-bg: oklch(0.28 0.05 75);
+  --info: oklch(0.75 0.13 240);
+  --danger: oklch(0.70 0.18 25);
+  --row-active: oklch(0.26 0.01 145 / 0.4);
+  --palette-bg: oklch(0.20 0.005 260 / 0.92);
+  --kbd-bg: oklch(0.22 0.004 260);
+}
+
+[data-theme="light"] {
+  --bg: oklch(0.985 0.003 85);
+  --chrome: oklch(0.965 0.003 85);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.95 0.003 85);
+  --line: oklch(0.88 0.004 85);
+  --line-soft: oklch(0.93 0.003 85);
+  --text: oklch(0.22 0.004 260);
+  --text-dim: oklch(0.50 0.006 260);
+  --text-dimmer: oklch(0.65 0.005 260);
+  --accent: oklch(0.62 0.17 145);
+  --accent-fg: oklch(0.99 0 0);
+  --warn: oklch(0.60 0.14 55);
+  --warn-bg: oklch(0.94 0.04 75);
+  --info: oklch(0.55 0.15 240);
+  --danger: oklch(0.55 0.22 25);
+  --row-active: oklch(0.93 0.02 145);
+  --palette-bg: oklch(0.99 0.003 85 / 0.95);
+  --kbd-bg: oklch(0.96 0.003 85);
+}
+
+[data-font="plex"] {
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+[data-font="inter"] {
+  --sans: "Inter", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+[data-font="grotesk"] {
+  --sans: "Space Grotesk", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+[data-font="system"] {
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    sans-serif;
+  --mono: "SF Mono", ui-monospace, monospace;
+}
+
+/* Density rows — consumed by <ProjectList /> via `var(--row-h)`. */
+[data-density="comfortable"] {
+  --row-h: 36px;
+  --sidebar-row-h: 32px;
+}
+[data-density="dense"] {
+  --row-h: 26px;
+  --sidebar-row-h: 28px;
+}
+[data-density="compact"] {
+  --row-h: 22px;
+  --sidebar-row-h: 24px;
+}
+
+/* Sidebar width (mutable via Zustand; default matches prototype). */
+:root {
+  --sidebar-w: 220px;
+}
