@@ -20,10 +20,7 @@ async fn main() -> anyhow::Result<()> {
     println!("seeding {SEED_COUNT} fake projects into {}", tmp.display());
     let seed_start = Instant::now();
     seed_projects(&db, SEED_COUNT).await?;
-    println!(
-        "  seeded in {:.2}s",
-        seed_start.elapsed().as_secs_f64()
-    );
+    println!("  seeded in {:.2}s", seed_start.elapsed().as_secs_f64());
 
     // --- list_projects ---
     let list_filter = ProjectFilter {
@@ -100,9 +97,15 @@ struct Outcome {
 
 fn judge(p99_ms: f64, budget_ms: u128) -> Outcome {
     if (p99_ms as u128) <= budget_ms {
-        Outcome { label: "pass", failed: false }
+        Outcome {
+            label: "pass",
+            failed: false,
+        }
     } else {
-        Outcome { label: "warn", failed: true }
+        Outcome {
+            label: "warn",
+            failed: true,
+        }
     }
 }
 

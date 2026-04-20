@@ -33,10 +33,7 @@ pub async fn templates_upsert(
 
 /// `settings.templates.remove` - delete a user template by id.
 #[tauri::command]
-pub async fn templates_remove(
-    state: State<'_, AppContext>,
-    id: String,
-) -> Result<(), String> {
+pub async fn templates_remove(state: State<'_, AppContext>, id: String) -> Result<(), String> {
     remove_user(&state.app_data_dir, &id)
         .await
         .map_err(|e: anyhow::Error| e.to_string())

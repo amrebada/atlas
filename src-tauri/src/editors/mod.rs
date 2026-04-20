@@ -170,11 +170,8 @@ pub fn launch(editor: &EditorEntry, project_path: &Path) -> Result<()> {
             .and_then(|s| s.strip_suffix('"'))
             .ok_or_else(|| anyhow!("malformed mac open command: {}", editor.cmd))?;
 
-        spawn_detached(
-            "open",
-            &["-a", app_name, &project_path.to_string_lossy()],
-        )
-        .with_context(|| format!("launch {} via `open -a`", editor.id))?;
+        spawn_detached("open", &["-a", app_name, &project_path.to_string_lossy()])
+            .with_context(|| format!("launch {} via `open -a`", editor.id))?;
         return Ok(());
     }
 
@@ -188,8 +185,7 @@ pub fn reveal(path: &Path) -> Result<()> {
     if !path.exists() {
         return Err(anyhow!("cannot reveal missing path: {}", path.display()));
     }
-    tauri_plugin_opener::reveal_item_in_dir(path)
-        .map_err(|e| anyhow!("reveal_item_in_dir: {e}"))
+    tauri_plugin_opener::reveal_item_in_dir(path).map_err(|e| anyhow!("reveal_item_in_dir: {e}"))
 }
 
 /// Spawn `cmd args…` without inheriting or holding any of the child's
@@ -248,7 +244,10 @@ mod tests {
     fn dump_detection_for_this_runner() {
         // Diagnostic-only: prints what the current machine sees. Safe to
         for e in force_uncached() {
-            eprintln!("[editors] id={:<8} present={:<5} cmd={}", e.id, e.present, e.cmd);
+            eprintln!(
+                "[editors] id={:<8} present={:<5} cmd={}",
+                e.id, e.present, e.cmd
+            );
         }
     }
 

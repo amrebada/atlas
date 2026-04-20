@@ -77,10 +77,7 @@ fn write_panic_record(info: &panic::PanicHookInfo<'_>) -> std::io::Result<()> {
     // Grab a fresh backtrace. `Backtrace::capture` honours
     let backtrace = std::backtrace::Backtrace::force_capture();
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
 
     writeln!(file, "---- PANIC {timestamp} ----")?;
     writeln!(file, "thread: {thread}")?;
@@ -114,10 +111,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let p = std::env::temp_dir().join(format!(
-            "atlas-crash-{tag}-{}-{ns}",
-            std::process::id()
-        ));
+        let p = std::env::temp_dir().join(format!("atlas-crash-{tag}-{}-{ns}", std::process::id()));
         fs::create_dir_all(&p).unwrap();
         p
     }
@@ -139,7 +133,10 @@ mod tests {
 
         // The catch_unwind path fires the current hook. If
         assert!(
-            !log_path.exists() || fs::metadata(&log_path).map(|m| m.len() == 0).unwrap_or(true),
+            !log_path.exists()
+                || fs::metadata(&log_path)
+                    .map(|m| m.len() == 0)
+                    .unwrap_or(true),
             "hook should no-op without opt-in, but wrote to {}",
             log_path.display()
         );

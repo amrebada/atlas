@@ -175,13 +175,11 @@ async fn reconcile_stale(db: &Db) -> anyhow::Result<u32> {
                 continue;
             }
             let now = chrono::Utc::now().to_rfc3339();
-            if let Err(e) = sqlx::query(
-                "UPDATE projects SET updated_at = ? WHERE id = ?",
-            )
-            .bind(&now)
-            .bind(&id)
-            .execute(db.pool())
-            .await
+            if let Err(e) = sqlx::query("UPDATE projects SET updated_at = ? WHERE id = ?")
+                .bind(&now)
+                .bind(&id)
+                .execute(db.pool())
+                .await
             {
                 tracing::warn!(error = %e, id = %id, "bump updated_at failed");
                 continue;
@@ -195,10 +193,9 @@ async fn reconcile_stale(db: &Db) -> anyhow::Result<u32> {
 
 /// Drop rows whose path no longer exists on disk, provided they were
 async fn drop_vanished(db: &Db) -> anyhow::Result<u32> {
-    let rows =
-        sqlx::query("SELECT id, path FROM projects WHERE source = 'discovery'")
-            .fetch_all(db.pool())
-            .await?;
+    let rows = sqlx::query("SELECT id, path FROM projects WHERE source = 'discovery'")
+        .fetch_all(db.pool())
+        .await?;
 
     let mut dropped: u32 = 0;
     for row in rows {
@@ -321,10 +318,9 @@ mod tests {
         let dropped = drop_vanished(&db).await?;
         assert_eq!(dropped, 1);
 
-        let remaining: Vec<(String,)> =
-            sqlx::query_as("SELECT id FROM projects ORDER BY id")
-                .fetch_all(db.pool())
-                .await?;
+        let remaining: Vec<(String,)> = sqlx::query_as("SELECT id FROM projects ORDER BY id")
+            .fetch_all(db.pool())
+            .await?;
         assert_eq!(remaining, vec![("b".to_string(),)]);
         Ok(())
     }

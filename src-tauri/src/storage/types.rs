@@ -40,7 +40,11 @@ pub enum Lang {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "kebab-case")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "kebab-case"
+)]
 pub enum PaneKind {
     Shell,
     Script,
@@ -49,7 +53,11 @@ pub enum PaneKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "lowercase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "lowercase"
+)]
 pub enum PaneStatus {
     Idle,
     Running,
@@ -59,7 +67,11 @@ pub enum PaneStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "lowercase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "lowercase"
+)]
 pub enum SessionStatus {
     Active,
     Idle,
@@ -68,7 +80,11 @@ pub enum SessionStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "lowercase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "lowercase"
+)]
 pub enum FileKind {
     Dir,
     File,
@@ -76,7 +92,11 @@ pub enum FileKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "lowercase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "lowercase"
+)]
 pub enum ScriptGroup {
     Run,
     Build,
@@ -86,7 +106,11 @@ pub enum ScriptGroup {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "lowercase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "lowercase"
+)]
 pub enum Theme {
     Dark,
     Light,
@@ -114,7 +138,11 @@ pub enum GitPollInterval {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct Project {
     pub id: ProjectId,
     pub name: String,
@@ -160,7 +188,11 @@ pub struct Collection {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct Todo {
     pub id: TodoId,
     pub done: bool,
@@ -172,7 +204,11 @@ pub struct Todo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct Note {
     pub id: NoteId,
     pub title: String,
@@ -199,7 +235,11 @@ pub struct Script {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct Session {
     pub id: SessionId,
     pub project_path: String,
@@ -243,7 +283,11 @@ pub struct Template {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct Pane {
     pub id: PaneId,
     pub kind: PaneKind,
@@ -263,7 +307,11 @@ pub struct Pane {
 /// The snapshot we persist per pane. Carries the user-visible hints
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct PaneSnapshot {
     pub id: String,
     /// One of "shell" | "script" | "claude-session" (mirrors `PaneKind`).
@@ -279,7 +327,11 @@ pub struct PaneSnapshot {
 /// Last-known layout for a project's terminal strip. Persisted on every
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct PaneLayout {
     /// One of "tabs" | "split-v" | "split-h" | "grid". Kept as string
     pub mode: String,
@@ -301,7 +353,11 @@ pub struct EditorEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct WatchRoot {
     pub path: String,
     #[ts(type = "number")]
@@ -312,7 +368,11 @@ pub struct WatchRoot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct GeneralSettings {
     pub launch_at_login: bool,
     pub menu_bar_agent: bool,
@@ -322,7 +382,11 @@ pub struct GeneralSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct EditorsSettings {
     pub detected: Vec<EditorEntry>,
     pub default_id: Option<String>,
@@ -349,7 +413,11 @@ pub enum FullLiteral {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct GitSettings {
     pub poll_interval: GitPollInterval,
     pub show_author: bool,
@@ -359,7 +427,11 @@ pub struct GitSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct AdvancedSettings {
     pub use_spotlight: bool,
     pub crash_reports: bool,
@@ -456,7 +528,11 @@ impl ProjectSource {
 /// Result of `Db::discover_root` - returned to UI so it can surface a
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct DiscoveryResult {
     pub root: String,
     pub new_project_ids: Vec<ProjectId>,

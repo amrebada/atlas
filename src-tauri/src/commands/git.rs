@@ -14,7 +14,11 @@ use crate::storage::Db;
 /// A single row returned by `git_branch_list`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct BranchInfo {
     /// Short branch name, e.g. `main` or `origin/feat/x`.
     pub name: String,
@@ -27,7 +31,11 @@ pub struct BranchInfo {
 /// Read-only result of a checkout preview.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct GitCheckoutPreview {
     /// The branch that was previewed (echoed from the request).
     pub branch: String,
@@ -61,7 +69,11 @@ pub async fn git_branch_list(
 /// Result of a mutating git action - surfaces the exit code and the raw
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct GitActionResult {
     pub ok: bool,
     pub stdout: String,
@@ -106,10 +118,7 @@ pub async fn git_stash(
 
 /// `git.push` - push the current branch to its tracked upstream. If no
 #[tauri::command]
-pub async fn git_push(
-    state: State<'_, Db>,
-    project_id: String,
-) -> Result<GitActionResult, String> {
+pub async fn git_push(state: State<'_, Db>, project_id: String) -> Result<GitActionResult, String> {
     let cwd = resolve_project_path(&state, &project_id).await?;
     // First attempt: plain `git push` (uses configured upstream).
     let first = run_git(&cwd, &["push"]).await?;
@@ -181,12 +190,10 @@ pub async fn git_checkout(
     let project_path = PathBuf::from(&project.path);
 
     let branch_for_call = branch.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        preview_checkout(&project_path, &branch_for_call)
-    })
-    .await
-    .map_err(|e| format!("join blocking: {e}"))?
-    .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || preview_checkout(&project_path, &branch_for_call))
+        .await
+        .map_err(|e| format!("join blocking: {e}"))?
+        .map_err(|e| e.to_string())
 }
 
 // ---- implementation ------------------------------------------------------
@@ -261,19 +268,13 @@ fn preview_checkout(project_path: &Path, branch: &str) -> anyhow::Result<GitChec
 
     let mut diff_opts = DiffOptions::new();
     diff_opts.ignore_submodules(true);
-    let diff = repo.diff_tree_to_tree(
-        head_tree.as_ref(),
-        Some(&target_tree),
-        Some(&mut diff_opts),
-    )?;
+    let diff =
+        repo.diff_tree_to_tree(head_tree.as_ref(), Some(&target_tree), Some(&mut diff_opts))?;
 
     let files_would_change: u32 = diff.deltas().len().try_into().unwrap_or(u32::MAX);
 
     let warning = if is_dirty {
-        Some(
-            "working tree has uncommitted changes — checkout would require stash"
-                .to_string(),
-        )
+        Some("working tree has uncommitted changes — checkout would require stash".to_string())
     } else {
         None
     };
@@ -358,7 +359,9 @@ mod tests {
             "exactly one local branch should be HEAD"
         );
         // No row equals or ends with "/HEAD".
-        assert!(rows.iter().all(|r| r.name != "HEAD" && !r.name.ends_with("/HEAD")));
+        assert!(rows
+            .iter()
+            .all(|r| r.name != "HEAD" && !r.name.ends_with("/HEAD")));
         Ok(())
     }
 

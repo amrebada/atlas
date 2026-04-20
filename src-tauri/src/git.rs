@@ -331,7 +331,10 @@ mod tests {
 
         // Also: calling with a non-repo subdir that's never been init'd
         let _ = s;
-        let outside = tmp.0.parent().ok_or_else(|| anyhow::anyhow!("no parent"))?
+        let outside = tmp
+            .0
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("no parent"))?
             .join("atlas-test-not-a-repo");
         let _ = fs::create_dir_all(&outside);
         let got = read_status(&outside)?;

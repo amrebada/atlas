@@ -6,7 +6,11 @@ use ts_rs::TS;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct SystemDiskUsage {
     #[ts(type = "number")]
     pub total_bytes: u64,
@@ -30,7 +34,10 @@ pub async fn system_disk_usage() -> Result<SystemDiskUsage, String> {
 
     let chosen = disks
         .iter()
-        .filter(|d| home.as_deref().is_none_or(|h| h.starts_with(d.mount_point())))
+        .filter(|d| {
+            home.as_deref()
+                .is_none_or(|h| h.starts_with(d.mount_point()))
+        })
         .max_by_key(|d| d.mount_point().as_os_str().len())
         .or_else(|| disks.iter().next());
 

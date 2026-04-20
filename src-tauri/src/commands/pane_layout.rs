@@ -34,10 +34,7 @@ pub async fn pane_layout_save(
 
 /// `pane_layout.clear` - delete the persisted layout for a project.
 #[tauri::command]
-pub async fn pane_layout_clear(
-    state: State<'_, Db>,
-    project_id: String,
-) -> Result<(), String> {
+pub async fn pane_layout_clear(state: State<'_, Db>, project_id: String) -> Result<(), String> {
     state
         .pane_layout_clear(&project_id)
         .await

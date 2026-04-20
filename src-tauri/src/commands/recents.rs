@@ -10,10 +10,7 @@ const DEFAULT_RECENTS_LIMIT: u32 = 20;
 
 /// `recents.push` - record that the user opened `project_id`. Idempotent
 #[tauri::command]
-pub async fn recents_push(
-    state: State<'_, Db>,
-    project_id: String,
-) -> Result<(), String> {
+pub async fn recents_push(state: State<'_, Db>, project_id: String) -> Result<(), String> {
     state
         .recents_push(&project_id)
         .await

@@ -10,10 +10,7 @@ use crate::storage::Db;
 
 /// `scripts.list` - return the merged script set for a project.
 #[tauri::command]
-pub async fn scripts_list(
-    state: State<'_, Db>,
-    project_id: String,
-) -> Result<Vec<Script>, String> {
+pub async fn scripts_list(state: State<'_, Db>, project_id: String) -> Result<Vec<Script>, String> {
     let project_path = resolve_project_path(&state, &project_id).await?;
 
     let stored = state

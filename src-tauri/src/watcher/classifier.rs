@@ -199,11 +199,7 @@ mod tests {
 
     #[test]
     fn package_json_routes_to_package_json() {
-        let k = classify(
-            Path::new("/u/code/myrepo/package.json"),
-            &roots(),
-            false,
-        );
+        let k = classify(Path::new("/u/code/myrepo/package.json"), &roots(), false);
         assert_eq!(
             k,
             EventKind::PackageJson {

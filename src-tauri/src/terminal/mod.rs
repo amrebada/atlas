@@ -288,10 +288,7 @@ impl TerminalManager {
 
     /// Resolve `(program, args)` from an `OpenRequest`. When `command` is
     fn resolve_program(req: &OpenRequest) -> (String, Vec<String>) {
-        let program = req
-            .command
-            .clone()
-            .unwrap_or_else(Self::default_shell);
+        let program = req.command.clone().unwrap_or_else(Self::default_shell);
         (program, req.args.clone())
     }
 
@@ -343,7 +340,11 @@ impl TerminalManager {
             let code = match child.wait() {
                 Ok(status) => {
                     let raw = status.exit_code() as i32;
-                    if status.success() { Some(0) } else { Some(raw) }
+                    if status.success() {
+                        Some(0)
+                    } else {
+                        Some(raw)
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, pane = %pane_id, "child.wait failed");

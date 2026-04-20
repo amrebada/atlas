@@ -8,9 +8,7 @@ use crate::storage::Db;
 
 /// `collections.list` - all collections ordered by `ord` ascending.
 #[tauri::command]
-pub async fn collections_list(
-    state: tauri::State<'_, Db>,
-) -> Result<Vec<Collection>, String> {
+pub async fn collections_list(state: tauri::State<'_, Db>) -> Result<Vec<Collection>, String> {
     state
         .list_collections()
         .await
@@ -31,10 +29,7 @@ pub async fn collections_upsert(
 
 /// `collections.remove` - delete by id. Cascades to `collection_members`.
 #[tauri::command]
-pub async fn collections_remove(
-    state: tauri::State<'_, Db>,
-    id: String,
-) -> Result<(), String> {
+pub async fn collections_remove(state: tauri::State<'_, Db>, id: String) -> Result<(), String> {
     state
         .remove_collection(&id)
         .await
@@ -109,10 +104,7 @@ pub async fn collections_update_color(
 
 /// `collections.delete` - delete the row + every membership entry in
 #[tauri::command]
-pub async fn collections_delete(
-    state: tauri::State<'_, Db>,
-    id: String,
-) -> Result<(), String> {
+pub async fn collections_delete(state: tauri::State<'_, Db>, id: String) -> Result<(), String> {
     state
         .delete_collection(&id)
         .await
@@ -196,9 +188,7 @@ mod tests {
     #[tokio::test]
     async fn create_honours_explicit_color() -> anyhow::Result<()> {
         let db = Db::open_in_memory().await?;
-        let c = db
-            .create_collection("Beta", Some("#ff00aa"))
-            .await?;
+        let c = db.create_collection("Beta", Some("#ff00aa")).await?;
         assert_eq!(c.dot, "#ff00aa");
         Ok(())
     }
@@ -212,12 +202,8 @@ mod tests {
         let c = db.create_collection("C", None).await?;
 
         // Reverse: c, b, a.
-        db.reorder_collections(&[
-            c.id.clone(),
-            b.id.clone(),
-            a.id.clone(),
-        ])
-        .await?;
+        db.reorder_collections(&[c.id.clone(), b.id.clone(), a.id.clone()])
+            .await?;
 
         let listed = db.list_collections().await?;
         assert_eq!(listed.len(), 3);
@@ -245,8 +231,7 @@ mod tests {
 
         let projs = db.list_collection_projects(&coll.id).await?;
         assert_eq!(projs.len(), 2);
-        let ids: std::collections::HashSet<&str> =
-            projs.iter().map(|p| p.id.as_str()).collect();
+        let ids: std::collections::HashSet<&str> = projs.iter().map(|p| p.id.as_str()).collect();
         assert!(ids.contains("acorn"));
         assert!(ids.contains("birch"));
         Ok(())
@@ -261,12 +246,10 @@ mod tests {
         db.add_project_to_collection("acorn", &coll.id).await?;
         db.add_project_to_collection("birch", &coll.id).await?;
 
-        db.remove_project_from_collection("acorn", &coll.id)
-            .await?;
+        db.remove_project_from_collection("acorn", &coll.id).await?;
 
         // Idempotent - re-remove is a no-op.
-        db.remove_project_from_collection("acorn", &coll.id)
-            .await?;
+        db.remove_project_from_collection("acorn", &coll.id).await?;
 
         let projs = db.list_collection_projects(&coll.id).await?;
         assert_eq!(projs.len(), 1);
@@ -290,12 +273,11 @@ mod tests {
         assert!(cols.iter().all(|c| c.id != coll.id));
 
         // Link rows gone (direct count on the table - not using
-        let (remaining,): (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM collection_members WHERE collection_id = ?",
-        )
-        .bind(&coll.id)
-        .fetch_one(db.pool())
-        .await?;
+        let (remaining,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM collection_members WHERE collection_id = ?")
+                .bind(&coll.id)
+                .fetch_one(db.pool())
+                .await?;
         assert_eq!(remaining, 0);
 
         // And neither project now claims membership in the gone id.

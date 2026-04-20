@@ -10,10 +10,7 @@ use crate::storage::Db;
 
 /// `notes.list` - every `<project>/.atlas/notes/*.json`, pinned first
 #[tauri::command]
-pub async fn notes_list(
-    state: State<'_, Db>,
-    project_id: String,
-) -> Result<Vec<Note>, String> {
+pub async fn notes_list(state: State<'_, Db>, project_id: String) -> Result<Vec<Note>, String> {
     state
         .notes_list(&project_id)
         .await

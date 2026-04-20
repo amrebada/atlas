@@ -26,7 +26,11 @@ const CLEANABLE_DIRS: &[&str] = &[
 /// Row returned by `disk.scan`. Shape matches the `DiskEntry` interface
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct DiskEntry {
     /// Human-readable label - the top-level dir name, or `(files)` for
     pub label: String,
@@ -46,7 +50,11 @@ pub struct DiskEntry {
 /// Aggregate shape returned by `disk.scan`. Matches
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct DiskScanResult {
     #[ts(type = "number")]
     pub total_bytes: u64,
@@ -61,10 +69,7 @@ pub struct DiskScanResult {
     fields(project_id = %project_id),
 )]
 #[tauri::command]
-pub async fn disk_scan(
-    state: State<'_, Db>,
-    project_id: String,
-) -> Result<DiskScanResult, String> {
+pub async fn disk_scan(state: State<'_, Db>, project_id: String) -> Result<DiskScanResult, String> {
     let project = state
         .get_project(&project_id)
         .await

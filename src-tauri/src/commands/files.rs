@@ -189,7 +189,11 @@ fn full_tree(project_path: &Path, max_depth: usize) -> anyhow::Result<Vec<FileNo
             depth,
             name,
             path: rel.to_string_lossy().into_owned(),
-            kind: if is_dir { FileKind::Dir } else { FileKind::File },
+            kind: if is_dir {
+                FileKind::Dir
+            } else {
+                FileKind::File
+            },
             status: None,
             delta: None,
         });

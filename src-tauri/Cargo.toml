@@ -17,13 +17,17 @@ default-run = "atlas"
 name = "atlas_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# P8 performance regression gate — invoked from CI + the release
-# workflow (see docs/RELEASES.md). Cargo otherwise auto-infers the bin
-# as `perf_check`; the explicit [[bin]] lets us keep the kebab-case
-# name that matches the CLI invocation.
+# Dev-only perf regression tool. Gated behind the `perf-tools` feature
+# so the release build doesn't try to bundle it alongside the Tauri app.
+# Run with: `cargo run --features perf-tools --bin perf-check`.
 [[bin]]
 name = "perf-check"
 path = "src/bin/perf_check.rs"
+required-features = ["perf-tools"]
+
+[features]
+default = []
+perf-tools = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

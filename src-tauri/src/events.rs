@@ -80,11 +80,8 @@ pub fn emit_project_updated(app: &AppHandle, id: &str, patch: Value) -> anyhow::
 
 /// Emit `project:discovered { project }` when a watcher sees a new repo.
 pub fn emit_project_discovered(app: &AppHandle, project: &Project) -> anyhow::Result<()> {
-    app.emit(
-        "project:discovered",
-        ProjectDiscoveredPayload { project },
-    )
-    .map_err(|e| anyhow::anyhow!("emit project:discovered: {e}"))
+    app.emit("project:discovered", ProjectDiscoveredPayload { project })
+        .map_err(|e| anyhow::anyhow!("emit project:discovered: {e}"))
 }
 
 /// Emit `project:removed { id }` when a watched repo disappears.
@@ -179,11 +176,7 @@ pub fn emit_terminal_data(app: &AppHandle, pane_id: &str, chunk: &[u8]) -> anyho
 }
 
 /// Emit `terminal:exit:<pane_id>` when the PTY child process terminates.
-pub fn emit_terminal_exit(
-    app: &AppHandle,
-    pane_id: &str,
-    code: Option<i32>,
-) -> anyhow::Result<()> {
+pub fn emit_terminal_exit(app: &AppHandle, pane_id: &str, code: Option<i32>) -> anyhow::Result<()> {
     let event = format!("terminal:exit:{pane_id}");
     app.emit(&event, TerminalExitPayload { code })
         .map_err(|e| anyhow::anyhow!("emit {event}: {e}"))

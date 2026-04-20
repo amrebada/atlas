@@ -129,7 +129,11 @@ const TEMPLATE_COPY_DENY: &[&str] = &[
 /// Request body for creating a new project from a template.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct CreateProjectParams {
     /// Display name for the new project. Also used as the directory
     pub name: String,
@@ -192,15 +196,13 @@ fn copy_template_tree(src: &Path, dest: &Path) -> anyhow::Result<u64> {
 
     while let Some((s, d)) = stack.pop() {
         // Create the destination directory if missing. `read_dir` below
-        std::fs::create_dir_all(&d)
-            .map_err(|e| anyhow::anyhow!("mkdir {}: {e}", d.display()))?;
+        std::fs::create_dir_all(&d).map_err(|e| anyhow::anyhow!("mkdir {}: {e}", d.display()))?;
 
-        let entries = std::fs::read_dir(&s)
-            .map_err(|e| anyhow::anyhow!("read_dir {}: {e}", s.display()))?;
+        let entries =
+            std::fs::read_dir(&s).map_err(|e| anyhow::anyhow!("read_dir {}: {e}", s.display()))?;
 
         for entry in entries {
-            let entry = entry
-                .map_err(|e| anyhow::anyhow!("read entry in {}: {e}", s.display()))?;
+            let entry = entry.map_err(|e| anyhow::anyhow!("read entry in {}: {e}", s.display()))?;
             let name = entry.file_name();
             if let Some(name_str) = name.to_str() {
                 if TEMPLATE_COPY_DENY.contains(&name_str) {
@@ -218,11 +220,7 @@ fn copy_template_tree(src: &Path, dest: &Path) -> anyhow::Result<u64> {
                 stack.push((s_child, d_child));
             } else if file_type.is_file() {
                 std::fs::copy(&s_child, &d_child).map_err(|e| {
-                    anyhow::anyhow!(
-                        "copy {} -> {}: {e}",
-                        s_child.display(),
-                        d_child.display()
-                    )
+                    anyhow::anyhow!("copy {} -> {}: {e}", s_child.display(), d_child.display())
                 })?;
                 copied += 1;
             }
@@ -484,7 +482,6 @@ mod tests {
         Ok(())
     }
 
-
     use crate::storage::Db;
 
     async fn ctx_with_tempdir(tag: &str) -> anyhow::Result<(AppContext, PathBuf)> {
@@ -522,7 +519,11 @@ mod tests {
         // The destination dir exists with a `.git`.
         let dest = workspace.join("alpha");
         assert!(dest.is_dir(), "dest missing: {}", dest.display());
-        assert!(dest.join(".git").exists(), "expected .git under {}", dest.display());
+        assert!(
+            dest.join(".git").exists(),
+            "expected .git under {}",
+            dest.display()
+        );
 
         // The project made it into the index with the same id.
         let p = ctx.db.get_project(&id).await?.expect("project registered");
@@ -585,7 +586,10 @@ mod tests {
         let dest = workspace.join("beta");
         assert!(dest.join("src/index.ts").is_file(), "src/index.ts missing");
         assert!(dest.join("package.json").is_file(), "package.json missing");
-        assert!(dest.join(".env").is_file(), "expected .env from create_env=true");
+        assert!(
+            dest.join(".env").is_file(),
+            "expected .env from create_env=true"
+        );
 
         // Deny-listed directories must NOT have been copied.
         assert!(

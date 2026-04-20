@@ -60,8 +60,7 @@ fn scan_root_inner(
     let start = std::time::Instant::now();
 
     // Ancestor-skip set. When we find `<dir>/.git`, we insert `<dir>` here;
-    let known_repos: Arc<Mutex<HashSet<PathBuf>>> =
-        Arc::new(Mutex::new(HashSet::new()));
+    let known_repos: Arc<Mutex<HashSet<PathBuf>>> = Arc::new(Mutex::new(HashSet::new()));
     let filter_known = known_repos.clone();
 
     let mut builder = WalkBuilder::new(root);
@@ -115,11 +114,7 @@ fn scan_root_inner(
         };
 
         // Report live progress for every directory we enter - NOT just on
-        if entry
-            .file_type()
-            .map(|t| t.is_dir())
-            .unwrap_or(false)
-        {
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             on_progress(entry.path(), out.len());
         }
 

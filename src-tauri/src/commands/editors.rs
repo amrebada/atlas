@@ -41,10 +41,7 @@ pub async fn editors_open_project(
         .ok_or_else(|| format!("unknown editor id: {wanted_id}"))?;
 
     if !chosen.present {
-        return Err(format!(
-            "{} is not installed on this machine",
-            chosen.name
-        ));
+        return Err(format!("{} is not installed on this machine", chosen.name));
     }
 
     let path = PathBuf::from(&project.path);

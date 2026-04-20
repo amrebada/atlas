@@ -68,9 +68,7 @@ pub fn read_json<T: DeserializeOwned>(path: &Path) -> anyhow::Result<Option<T>> 
 
 /// Compute the canonical `<project>/.atlas/<name>.json` path.
 pub fn atlas_file(project_path: &Path, name: &str) -> PathBuf {
-    project_path
-        .join(".atlas")
-        .join(format!("{name}.json"))
+    project_path.join(".atlas").join(format!("{name}.json"))
 }
 
 /// Compute the canonical `<project>/.atlas/notes/<id>.json` path used by
@@ -132,7 +130,10 @@ mod tests {
 
         // File on disk is pretty + trailing newline.
         let raw = fs::read_to_string(&path)?;
-        assert!(raw.ends_with('\n'), "expected trailing newline, got {raw:?}");
+        assert!(
+            raw.ends_with('\n'),
+            "expected trailing newline, got {raw:?}"
+        );
         assert!(raw.contains("\n  "), "expected pretty-print indent");
 
         let parsed: Sample = read_json(&path)?.expect("file exists");
@@ -157,7 +158,14 @@ mod tests {
         // A successful write must clean up its temp sibling - i.e. the
         let dir = unique_dir("notmp");
         let path = dir.join("foo.json");
-        write_json(&path, &Sample { name: "ok".into(), n: 1, opts: vec![] })?;
+        write_json(
+            &path,
+            &Sample {
+                name: "ok".into(),
+                n: 1,
+                opts: vec![],
+            },
+        )?;
 
         // No `.foo.json.tmp` left behind.
         let tmp = dir.join(".foo.json.tmp");
@@ -174,8 +182,22 @@ mod tests {
     fn write_json_overwrites_existing() -> anyhow::Result<()> {
         let dir = unique_dir("overwrite");
         let path = dir.join("a.json");
-        write_json(&path, &Sample { name: "v1".into(), n: 1, opts: vec![] })?;
-        write_json(&path, &Sample { name: "v2".into(), n: 2, opts: vec![] })?;
+        write_json(
+            &path,
+            &Sample {
+                name: "v1".into(),
+                n: 1,
+                opts: vec![],
+            },
+        )?;
+        write_json(
+            &path,
+            &Sample {
+                name: "v2".into(),
+                n: 2,
+                opts: vec![],
+            },
+        )?;
         let got: Sample = read_json(&path)?.expect("present");
         assert_eq!(got.name, "v2");
         assert_eq!(got.n, 2);

@@ -102,11 +102,7 @@ pub async fn projects_discover(
 }
 
 /// Background helper: refresh metrics for `project_id` and emit
-pub(crate) async fn spawn_metrics_refresh(
-    db: Db,
-    app: tauri::AppHandle,
-    project_id: String,
-) {
+pub(crate) async fn spawn_metrics_refresh(db: Db, app: tauri::AppHandle, project_id: String) {
     match db.refresh_project_metrics(&project_id).await {
         Ok(metrics) => {
             let size_str = crate::util::format_bytes(metrics.size_bytes);
@@ -190,7 +186,11 @@ pub async fn projects_set_tags(
 /// Camel-case DTO returned by `projects_refresh_metrics`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct ProjectMetricsDto {
     #[ts(type = "number")]
     pub loc: u64,
@@ -285,7 +285,11 @@ pub async fn projects_move_to_trash(
 /// Outcome of a single `projects.repair` invocation. camelCase in the TS
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/types/rust.ts", rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct ProjectRepairReport {
     /// Number of files re-read (present OR absent). `project.json`,
     #[ts(type = "number")]
@@ -450,27 +454,27 @@ fn repair_json_object(project_path: &Path, name: &str, report: &mut ProjectRepai
         return;
     }
     match std::fs::read(&file) {
-        Ok(bytes) => match serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(
-            &bytes,
-        ) {
-            Ok(_) => {}
-            Err(err) => {
-                let msg = format!("{name}.json: invalid JSON ({err}); rewrote as {{}}");
-                tracing::warn!(
-                    error = %err,
-                    path = %file.display(),
-                    "malformed .atlas/{name}.json — substituting empty object"
-                );
-                let empty = serde_json::Map::<String, serde_json::Value>::new();
-                if let Err(e) = write_json(&file, &empty) {
-                    tracing::warn!(error = %e, path = %file.display(), "rewrite as {{}} failed");
-                    report.issues.push(format!("{name}.json: {e}"));
-                    return;
+        Ok(bytes) => {
+            match serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes) {
+                Ok(_) => {}
+                Err(err) => {
+                    let msg = format!("{name}.json: invalid JSON ({err}); rewrote as {{}}");
+                    tracing::warn!(
+                        error = %err,
+                        path = %file.display(),
+                        "malformed .atlas/{name}.json — substituting empty object"
+                    );
+                    let empty = serde_json::Map::<String, serde_json::Value>::new();
+                    if let Err(e) = write_json(&file, &empty) {
+                        tracing::warn!(error = %e, path = %file.display(), "rewrite as {{}} failed");
+                        report.issues.push(format!("{name}.json: {e}"));
+                        return;
+                    }
+                    report.files_repaired = report.files_repaired.saturating_add(1);
+                    report.issues.push(msg);
                 }
-                report.files_repaired = report.files_repaired.saturating_add(1);
-                report.issues.push(msg);
             }
-        },
+        }
         Err(err) => {
             let msg = format!("{name}.json: read failed ({err}); rewrote as {{}}");
             tracing::warn!(
@@ -530,10 +534,7 @@ fn repair_notes_dir(project_path: &Path, report: &mut ProjectRepairReport) {
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(err) => {
-                let msg = format!(
-                    "{}: read failed ({err}); rewrote as {{}}",
-                    path.display()
-                );
+                let msg = format!("{}: read failed ({err}); rewrote as {{}}", path.display());
                 tracing::warn!(
                     error = %err,
                     path = %path.display(),
@@ -615,9 +616,13 @@ mod tests {
 
         // File on disk is now parseable as an empty list.
         let bytes = fs::read(&todos)?;
-        let parsed: Vec<Todo> = serde_json::from_slice(&bytes)
-            .expect("rewritten todos.json must parse as Vec<Todo>");
-        assert!(parsed.is_empty(), "expected empty list, got {} items", parsed.len());
+        let parsed: Vec<Todo> =
+            serde_json::from_slice(&bytes).expect("rewritten todos.json must parse as Vec<Todo>");
+        assert!(
+            parsed.is_empty(),
+            "expected empty list, got {} items",
+            parsed.len()
+        );
 
         fs::remove_dir_all(&project).ok();
         Ok(())
@@ -630,7 +635,8 @@ mod tests {
         let atlas = project.join(".atlas");
         fs::create_dir_all(&atlas)?;
         let todos = atlas.join("todos.json");
-        let original = br#"[{"id":"t1","done":false,"text":"ship","createdAt":"2025-01-01T00:00:00Z"}]"#;
+        let original =
+            br#"[{"id":"t1","done":false,"text":"ship","createdAt":"2025-01-01T00:00:00Z"}]"#;
         fs::write(&todos, original)?;
 
         let mut report = ProjectRepairReport {

@@ -6,9 +6,14 @@ on:
       - "v*"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build ${{ matrix.platform }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

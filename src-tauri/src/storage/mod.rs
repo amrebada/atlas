@@ -13,14 +13,14 @@ pub mod types;
 use std::path::PathBuf;
 
 pub use db::Db;
-pub use discovery::{DiscoveredRepo, scan_root};
+pub use discovery::{scan_root, DiscoveredRepo};
 pub use types::{
     AdvancedSettings, CloneDepth, Collection, CollectionId, DiscoveryResult, EditorEntry,
     EditorsSettings, FileKind, FileNode, FullLiteral, GeneralSettings, GitPollInterval,
-    GitSettings, Lang, Note, NoteId, PaletteItem, Pane, PaneId, PaneKind, PaneLayout,
-    PaneSnapshot, PaneStatus, Project, ProjectFilter, ProjectId, ProjectSource, Script,
-    ScriptGroup, ScriptId, Session, SessionId, SessionStatus, Settings, Template, TemplateId,
-    Theme, Todo, TodoId, WatchRoot,
+    GitSettings, Lang, Note, NoteId, PaletteItem, Pane, PaneId, PaneKind, PaneLayout, PaneSnapshot,
+    PaneStatus, Project, ProjectFilter, ProjectId, ProjectSource, Script, ScriptGroup, ScriptId,
+    Session, SessionId, SessionStatus, Settings, Template, TemplateId, Theme, Todo, TodoId,
+    WatchRoot,
 };
 
 /// Bundle of long-lived resources the settings + templates commands need.

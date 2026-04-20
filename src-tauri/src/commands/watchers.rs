@@ -66,14 +66,7 @@ pub async fn watchers_add(
         "info",
         &format!("Scanning {display_name} for git repos…"),
     );
-    let _ = events::emit_discovery_progress(
-        &app,
-        &path,
-        DiscoveryPhase::Walking,
-        None,
-        0,
-        None,
-    );
+    let _ = events::emit_discovery_progress(&app, &path, DiscoveryPhase::Walking, None, 0, None);
 
     state
         .add_root(root.clone(), depth)
@@ -94,10 +87,8 @@ pub async fn watchers_add(
         let mut last_tick: Option<Instant> = None;
         let mut total_ticks = 0usize;
         let mut emitted_ticks = 0usize;
-        let result = scan_root_with_progress(
-            &root_for_scan,
-            depth,
-            |current: &Path, found: usize| {
+        let result =
+            scan_root_with_progress(&root_for_scan, depth, |current: &Path, found: usize| {
                 total_ticks += 1;
                 let now = Instant::now();
                 let should_emit = match last_tick {
@@ -120,8 +111,7 @@ pub async fn watchers_add(
                 ) {
                     tracing::warn!(error = %e, "emit discovery:progress failed");
                 }
-            },
-        );
+            });
         tracing::info!(total_ticks, emitted_ticks, "discovery walker finished");
         result
     })
@@ -137,14 +127,8 @@ pub async fn watchers_add(
                 "error",
                 &format!("Discovery failed in {display_name}: {e}"),
             );
-            let _ = events::emit_discovery_progress(
-                &app,
-                &path,
-                DiscoveryPhase::Done,
-                None,
-                0,
-                None,
-            );
+            let _ =
+                events::emit_discovery_progress(&app, &path, DiscoveryPhase::Done, None, 0, None);
             return Ok(());
         }
     };

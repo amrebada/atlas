@@ -90,11 +90,7 @@ fn build_menu<R: Runtime>(
         let mut sub = SubmenuBuilder::new(app, "Recent projects");
         for (i, p) in recents.iter().take(10).enumerate() {
             let id = format!("tray::recent::{i}");
-            sub = sub.item(
-                &MenuItemBuilder::new(&p.name)
-                    .id(&id)
-                    .build(app)?,
-            );
+            sub = sub.item(&MenuItemBuilder::new(&p.name).id(&id).build(app)?);
         }
         builder = builder.item(&sub.build()?);
     }
@@ -106,11 +102,7 @@ fn build_menu<R: Runtime>(
                 .id("tray::show")
                 .build(app)?,
         )
-        .item(
-            &MenuItemBuilder::new("Quit")
-                .id("tray::quit")
-                .build(app)?,
-        );
+        .item(&MenuItemBuilder::new("Quit").id("tray::quit").build(app)?);
 
     builder.build()
 }
@@ -131,10 +123,7 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         }
         "tray::show" => show_main_window(app),
         id if id.starts_with("tray::recent::") => {
-            let project_id = recents_map()
-                .lock()
-                .ok()
-                .and_then(|m| m.get(id).cloned());
+            let project_id = recents_map().lock().ok().and_then(|m| m.get(id).cloned());
             if let Some(pid) = project_id {
                 show_main_window(app);
                 let _ = app.emit("tray:open-project", pid);

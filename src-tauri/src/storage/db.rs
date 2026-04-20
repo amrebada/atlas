@@ -49,8 +49,7 @@ impl Db {
     #[cfg(test)]
     pub async fn open_in_memory() -> anyhow::Result<Db> {
         // :memory: doesn't support WAL - use the default journal.
-        let opts = SqliteConnectOptions::from_str("sqlite::memory:")?
-            .foreign_keys(true);
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")?.foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(opts)
@@ -85,9 +84,7 @@ impl Db {
             sql.push_str(" AND pinned = 1");
         }
         if filter.tag.is_some() {
-            sql.push_str(
-                " AND id IN (SELECT project_id FROM tags WHERE tag = ?)",
-            );
+            sql.push_str(" AND id IN (SELECT project_id FROM tags WHERE tag = ?)");
         }
         if filter.collection_id.is_some() {
             sql.push_str(
@@ -145,17 +142,16 @@ impl Db {
         }
 
         // Quote the user input so FTS5 treats it as a phrase unless the
-        let fts_query =
-            if trimmed.contains('"') || trimmed.contains('*') || trimmed.contains(':') {
-                trimmed.to_string()
-            } else {
-                // Prefix match on every whitespace-separated word.
-                trimmed
-                    .split_whitespace()
-                    .map(|w| format!("{}*", w))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            };
+        let fts_query = if trimmed.contains('"') || trimmed.contains('*') || trimmed.contains(':') {
+            trimmed.to_string()
+        } else {
+            // Prefix match on every whitespace-separated word.
+            trimmed
+                .split_whitespace()
+                .map(|w| format!("{}*", w))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
 
         let rows = sqlx::query(
             "SELECT p.id, p.name, p.path, p.language, p.color, p.branch, \
@@ -216,18 +212,258 @@ impl Db {
 
         // relative offset from `now` so the list has a realistic recency
         let projects: &[SeedProject] = &[
-            SeedProject { id: "acorn", name: "acorn-api", path: "~/code/work/acorn-api", language: Lang::Rust, color: "#E0763C", branch: "main", dirty: 0, ahead: 0, behind: 0, loc: 48210, size_bytes: 412 * 1_048_576, last_opened_minutes_ago: Some(120), pinned: true, tags: &["work", "api"], todos: 3, notes: 2, time: "4h 22m", archived: false, collection: "work" },
-            SeedProject { id: "birch", name: "birch-dashboard", path: "~/code/work/birch-dashboard", language: Lang::TypeScript, color: "#3178C6", branch: "feat/charts", dirty: 12, ahead: 2, behind: 0, loc: 32140, size_bytes: 1_288_490_188, last_opened_minutes_ago: Some(18), pinned: true, tags: &["work", "frontend"], todos: 7, notes: 5, time: "12h 08m", archived: false, collection: "work" },
-            SeedProject { id: "cedar", name: "cedar-cli", path: "~/code/oss/cedar-cli", language: Lang::Go, color: "#00ADD8", branch: "main", dirty: 0, ahead: 0, behind: 3, loc: 8420, size_bytes: 86 * 1_048_576, last_opened_minutes_ago: Some(60 * 24), pinned: false, tags: &["oss", "cli"], todos: 1, notes: 0, time: "1h 45m", archived: false, collection: "oss" },
-            SeedProject { id: "dahlia", name: "dahlia-site", path: "~/code/personal/dahlia-site", language: Lang::Other, color: "#FF5D01", branch: "draft/2026", dirty: 4, ahead: 0, behind: 0, loc: 6120, size_bytes: 240 * 1_048_576, last_opened_minutes_ago: Some(60 * 24 * 3), pinned: false, tags: &["personal", "web"], todos: 2, notes: 1, time: "0h 40m", archived: false, collection: "personal" },
-            SeedProject { id: "elm", name: "elm-engine", path: "~/code/work/elm-engine", language: Lang::CPlusPlus, color: "#F34B7D", branch: "perf/simd", dirty: 31, ahead: 0, behind: 1, loc: 142310, size_bytes: 3_006_477_107, last_opened_minutes_ago: Some(60 * 24 * 5), pinned: false, tags: &["work", "engine"], todos: 12, notes: 11, time: "38h 14m", archived: false, collection: "work" },
-            SeedProject { id: "fern", name: "fern-notes", path: "~/code/personal/fern-notes", language: Lang::Swift, color: "#F05138", branch: "main", dirty: 0, ahead: 1, behind: 0, loc: 3890, size_bytes: 52 * 1_048_576, last_opened_minutes_ago: Some(60 * 24 * 7), pinned: false, tags: &["personal", "mac"], todos: 0, notes: 0, time: "2h 30m", archived: false, collection: "personal" },
-            SeedProject { id: "ginkgo", name: "ginkgo-scratch", path: "~/code/scratch/ginkgo-scratch", language: Lang::Python, color: "#3572A5", branch: "main", dirty: 2, ahead: 0, behind: 0, loc: 1240, size_bytes: 18 * 1_048_576, last_opened_minutes_ago: Some(60 * 4), pinned: false, tags: &["scratch"], todos: 0, notes: 0, time: "0h 12m", archived: false, collection: "scratch" },
-            SeedProject { id: "hawthorn", name: "hawthorn-ml", path: "~/code/work/hawthorn-ml", language: Lang::Python, color: "#3572A5", branch: "exp/lora-v3", dirty: 8, ahead: 0, behind: 0, loc: 22470, size_bytes: 15_676_334_080, last_opened_minutes_ago: Some(60), pinned: true, tags: &["work", "ml"], todos: 4, notes: 7, time: "19h 02m", archived: false, collection: "work" },
-            SeedProject { id: "ivy", name: "ivy-docs", path: "~/code/work/ivy-docs", language: Lang::Other, color: "#8A2BE2", branch: "main", dirty: 0, ahead: 0, behind: 0, loc: 4120, size_bytes: 72 * 1_048_576, last_opened_minutes_ago: Some(60 * 24 * 21), pinned: false, tags: &["work", "docs"], todos: 0, notes: 0, time: "0h 55m", archived: false, collection: "work" },
-            SeedProject { id: "juniper", name: "juniper-infra", path: "~/code/work/juniper-infra", language: Lang::Other, color: "#844FBA", branch: "prod", dirty: 0, ahead: 0, behind: 0, loc: 5840, size_bytes: 94 * 1_048_576, last_opened_minutes_ago: Some(60 * 24 * 12), pinned: false, tags: &["work", "devops"], todos: 2, notes: 1, time: "3h 10m", archived: false, collection: "work" },
-            SeedProject { id: "kelp", name: "kelp-player", path: "~/code/personal/kelp-player", language: Lang::TypeScript, color: "#3178C6", branch: "main", dirty: 0, ahead: 0, behind: 0, loc: 14220, size_bytes: 320 * 1_048_576, last_opened_minutes_ago: Some(60 * 24 * 60), pinned: false, tags: &["personal", "audio"], todos: 0, notes: 3, time: "0h 00m", archived: true, collection: "personal" },
-            SeedProject { id: "larch", name: "larch-game", path: "~/code/scratch/larch-game", language: Lang::Other, color: "#EC915C", branch: "main", dirty: 6, ahead: 0, behind: 0, loc: 2240, size_bytes: 46 * 1_048_576, last_opened_minutes_ago: Some(60 * 24 * 6), pinned: false, tags: &["scratch", "game"], todos: 3, notes: 2, time: "1h 05m", archived: false, collection: "scratch" },
+            SeedProject {
+                id: "acorn",
+                name: "acorn-api",
+                path: "~/code/work/acorn-api",
+                language: Lang::Rust,
+                color: "#E0763C",
+                branch: "main",
+                dirty: 0,
+                ahead: 0,
+                behind: 0,
+                loc: 48210,
+                size_bytes: 412 * 1_048_576,
+                last_opened_minutes_ago: Some(120),
+                pinned: true,
+                tags: &["work", "api"],
+                todos: 3,
+                notes: 2,
+                time: "4h 22m",
+                archived: false,
+                collection: "work",
+            },
+            SeedProject {
+                id: "birch",
+                name: "birch-dashboard",
+                path: "~/code/work/birch-dashboard",
+                language: Lang::TypeScript,
+                color: "#3178C6",
+                branch: "feat/charts",
+                dirty: 12,
+                ahead: 2,
+                behind: 0,
+                loc: 32140,
+                size_bytes: 1_288_490_188,
+                last_opened_minutes_ago: Some(18),
+                pinned: true,
+                tags: &["work", "frontend"],
+                todos: 7,
+                notes: 5,
+                time: "12h 08m",
+                archived: false,
+                collection: "work",
+            },
+            SeedProject {
+                id: "cedar",
+                name: "cedar-cli",
+                path: "~/code/oss/cedar-cli",
+                language: Lang::Go,
+                color: "#00ADD8",
+                branch: "main",
+                dirty: 0,
+                ahead: 0,
+                behind: 3,
+                loc: 8420,
+                size_bytes: 86 * 1_048_576,
+                last_opened_minutes_ago: Some(60 * 24),
+                pinned: false,
+                tags: &["oss", "cli"],
+                todos: 1,
+                notes: 0,
+                time: "1h 45m",
+                archived: false,
+                collection: "oss",
+            },
+            SeedProject {
+                id: "dahlia",
+                name: "dahlia-site",
+                path: "~/code/personal/dahlia-site",
+                language: Lang::Other,
+                color: "#FF5D01",
+                branch: "draft/2026",
+                dirty: 4,
+                ahead: 0,
+                behind: 0,
+                loc: 6120,
+                size_bytes: 240 * 1_048_576,
+                last_opened_minutes_ago: Some(60 * 24 * 3),
+                pinned: false,
+                tags: &["personal", "web"],
+                todos: 2,
+                notes: 1,
+                time: "0h 40m",
+                archived: false,
+                collection: "personal",
+            },
+            SeedProject {
+                id: "elm",
+                name: "elm-engine",
+                path: "~/code/work/elm-engine",
+                language: Lang::CPlusPlus,
+                color: "#F34B7D",
+                branch: "perf/simd",
+                dirty: 31,
+                ahead: 0,
+                behind: 1,
+                loc: 142310,
+                size_bytes: 3_006_477_107,
+                last_opened_minutes_ago: Some(60 * 24 * 5),
+                pinned: false,
+                tags: &["work", "engine"],
+                todos: 12,
+                notes: 11,
+                time: "38h 14m",
+                archived: false,
+                collection: "work",
+            },
+            SeedProject {
+                id: "fern",
+                name: "fern-notes",
+                path: "~/code/personal/fern-notes",
+                language: Lang::Swift,
+                color: "#F05138",
+                branch: "main",
+                dirty: 0,
+                ahead: 1,
+                behind: 0,
+                loc: 3890,
+                size_bytes: 52 * 1_048_576,
+                last_opened_minutes_ago: Some(60 * 24 * 7),
+                pinned: false,
+                tags: &["personal", "mac"],
+                todos: 0,
+                notes: 0,
+                time: "2h 30m",
+                archived: false,
+                collection: "personal",
+            },
+            SeedProject {
+                id: "ginkgo",
+                name: "ginkgo-scratch",
+                path: "~/code/scratch/ginkgo-scratch",
+                language: Lang::Python,
+                color: "#3572A5",
+                branch: "main",
+                dirty: 2,
+                ahead: 0,
+                behind: 0,
+                loc: 1240,
+                size_bytes: 18 * 1_048_576,
+                last_opened_minutes_ago: Some(60 * 4),
+                pinned: false,
+                tags: &["scratch"],
+                todos: 0,
+                notes: 0,
+                time: "0h 12m",
+                archived: false,
+                collection: "scratch",
+            },
+            SeedProject {
+                id: "hawthorn",
+                name: "hawthorn-ml",
+                path: "~/code/work/hawthorn-ml",
+                language: Lang::Python,
+                color: "#3572A5",
+                branch: "exp/lora-v3",
+                dirty: 8,
+                ahead: 0,
+                behind: 0,
+                loc: 22470,
+                size_bytes: 15_676_334_080,
+                last_opened_minutes_ago: Some(60),
+                pinned: true,
+                tags: &["work", "ml"],
+                todos: 4,
+                notes: 7,
+                time: "19h 02m",
+                archived: false,
+                collection: "work",
+            },
+            SeedProject {
+                id: "ivy",
+                name: "ivy-docs",
+                path: "~/code/work/ivy-docs",
+                language: Lang::Other,
+                color: "#8A2BE2",
+                branch: "main",
+                dirty: 0,
+                ahead: 0,
+                behind: 0,
+                loc: 4120,
+                size_bytes: 72 * 1_048_576,
+                last_opened_minutes_ago: Some(60 * 24 * 21),
+                pinned: false,
+                tags: &["work", "docs"],
+                todos: 0,
+                notes: 0,
+                time: "0h 55m",
+                archived: false,
+                collection: "work",
+            },
+            SeedProject {
+                id: "juniper",
+                name: "juniper-infra",
+                path: "~/code/work/juniper-infra",
+                language: Lang::Other,
+                color: "#844FBA",
+                branch: "prod",
+                dirty: 0,
+                ahead: 0,
+                behind: 0,
+                loc: 5840,
+                size_bytes: 94 * 1_048_576,
+                last_opened_minutes_ago: Some(60 * 24 * 12),
+                pinned: false,
+                tags: &["work", "devops"],
+                todos: 2,
+                notes: 1,
+                time: "3h 10m",
+                archived: false,
+                collection: "work",
+            },
+            SeedProject {
+                id: "kelp",
+                name: "kelp-player",
+                path: "~/code/personal/kelp-player",
+                language: Lang::TypeScript,
+                color: "#3178C6",
+                branch: "main",
+                dirty: 0,
+                ahead: 0,
+                behind: 0,
+                loc: 14220,
+                size_bytes: 320 * 1_048_576,
+                last_opened_minutes_ago: Some(60 * 24 * 60),
+                pinned: false,
+                tags: &["personal", "audio"],
+                todos: 0,
+                notes: 3,
+                time: "0h 00m",
+                archived: true,
+                collection: "personal",
+            },
+            SeedProject {
+                id: "larch",
+                name: "larch-game",
+                path: "~/code/scratch/larch-game",
+                language: Lang::Other,
+                color: "#EC915C",
+                branch: "main",
+                dirty: 6,
+                ahead: 0,
+                behind: 0,
+                loc: 2240,
+                size_bytes: 46 * 1_048_576,
+                last_opened_minutes_ago: Some(60 * 24 * 6),
+                pinned: false,
+                tags: &["scratch", "game"],
+                todos: 3,
+                notes: 2,
+                time: "1h 05m",
+                archived: false,
+                collection: "scratch",
+            },
         ];
 
         for p in projects {
@@ -272,13 +508,11 @@ impl Db {
                     .await?;
             }
 
-            sqlx::query(
-                "INSERT INTO collection_members (collection_id, project_id) VALUES (?, ?)",
-            )
-            .bind(p.collection)
-            .bind(p.id)
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query("INSERT INTO collection_members (collection_id, project_id) VALUES (?, ?)")
+                .bind(p.collection)
+                .bind(p.id)
+                .execute(&mut *tx)
+                .await?;
 
             // FTS index - manually maintained because we use `content=projects`
             let tags_joined = p.tags.join(" ");
@@ -326,10 +560,7 @@ impl Db {
             .collect();
 
         let lang_str: Option<String> = row.try_get("language").ok();
-        let language = lang_str
-            .as_deref()
-            .map(str_to_lang)
-            .unwrap_or(Lang::Other);
+        let language = lang_str.as_deref().map(str_to_lang).unwrap_or(Lang::Other);
 
         let pinned_i: i64 = row.try_get("pinned").unwrap_or(0);
         let archived_i: i64 = row.try_get("archived").unwrap_or(0);
@@ -339,8 +570,12 @@ impl Db {
             name: row.try_get("name")?,
             path: row.try_get("path")?,
             language,
-            color: row.try_get::<Option<String>, _>("color")?.unwrap_or_default(),
-            branch: row.try_get::<Option<String>, _>("branch")?.unwrap_or_default(),
+            color: row
+                .try_get::<Option<String>, _>("color")?
+                .unwrap_or_default(),
+            branch: row
+                .try_get::<Option<String>, _>("branch")?
+                .unwrap_or_default(),
             dirty: row.try_get("dirty")?,
             ahead: row.try_get("ahead")?,
             behind: row.try_get("behind")?,
@@ -425,22 +660,17 @@ impl Db {
 
     /// All indexed project paths (absolute). Used by the watcher manager
     pub async fn all_project_paths(&self) -> anyhow::Result<Vec<PathBuf>> {
-        let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT path FROM projects WHERE archived = 0 AND source = 'discovery'",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT path FROM projects WHERE archived = 0 AND source = 'discovery'")
+                .fetch_all(&self.pool)
+                .await?;
         Ok(rows.into_iter().map(|(p,)| PathBuf::from(p)).collect())
     }
 
     // =================================================================
 
     /// Run `scan_root` then upsert every repo it finds. Returns the ids
-    pub async fn discover_root(
-        &self,
-        root: &Path,
-        depth: u8,
-    ) -> anyhow::Result<Vec<String>> {
+    pub async fn discover_root(&self, root: &Path, depth: u8) -> anyhow::Result<Vec<String>> {
         let repos = scan_root(root, depth)?;
         self.upsert_repos(&repos).await
     }
@@ -459,10 +689,7 @@ impl Db {
         self.upsert_repos(&repos).await
     }
 
-    async fn upsert_repos(
-        &self,
-        repos: &[DiscoveredRepo],
-    ) -> anyhow::Result<Vec<String>> {
+    async fn upsert_repos(&self, repos: &[DiscoveredRepo]) -> anyhow::Result<Vec<String>> {
         let mut new_ids = Vec::new();
         for repo in repos {
             let id = project_id_for_path(&repo.path);
@@ -476,10 +703,7 @@ impl Db {
     }
 
     /// Upsert a single discovered repo. Returns its stable project id.
-    pub async fn upsert_discovered(
-        &self,
-        repo: &DiscoveredRepo,
-    ) -> anyhow::Result<String> {
+    pub async fn upsert_discovered(&self, repo: &DiscoveredRepo) -> anyhow::Result<String> {
         let id = project_id_for_path(&repo.path);
         let now = chrono::Utc::now().to_rfc3339();
         let path_str = repo.path.to_string_lossy().to_string();
@@ -511,11 +735,10 @@ impl Db {
         .await?;
 
         // Re-sync the FTS row. FTS5 with `content=projects` would normally
-        let rowid: (i64,) =
-            sqlx::query_as("SELECT rowid FROM projects WHERE id = ?")
-                .bind(&id)
-                .fetch_one(&self.pool)
-                .await?;
+        let rowid: (i64,) = sqlx::query_as("SELECT rowid FROM projects WHERE id = ?")
+            .bind(&id)
+            .fetch_one(&self.pool)
+            .await?;
         fts_replace_project(&self.pool, rowid.0, &repo.name, &path_str, "").await?;
 
         Ok(id)
@@ -560,11 +783,9 @@ impl Db {
             .ok_or_else(|| anyhow::anyhow!("project not found: {project_id}"))?;
         let path = PathBuf::from(&project.path);
 
-        let metrics = tauri::async_runtime::spawn_blocking(move || {
-            crate::metrics::compute(&path)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("join blocking metrics: {e}"))??;
+        let metrics = tauri::async_runtime::spawn_blocking(move || crate::metrics::compute(&path))
+            .await
+            .map_err(|e| anyhow::anyhow!("join blocking metrics: {e}"))??;
 
         // NOTE: The `projects` table has `loc` and `size_bytes` columns
         let now = chrono::Utc::now().to_rfc3339();
@@ -692,11 +913,7 @@ impl Db {
     }
 
     /// `scripts.upsert` - insert or replace a script by id, then write
-    pub async fn scripts_upsert(
-        &self,
-        project_id: &str,
-        script: &Script,
-    ) -> anyhow::Result<()> {
+    pub async fn scripts_upsert(&self, project_id: &str, script: &Script) -> anyhow::Result<()> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_file(&project_path, "scripts");
         let mut scripts: Vec<Script> = read_json(&file)?.unwrap_or_default();
@@ -710,11 +927,7 @@ impl Db {
     }
 
     /// `scripts.delete` - remove a script by id. No-op if absent.
-    pub async fn scripts_delete(
-        &self,
-        project_id: &str,
-        script_id: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn scripts_delete(&self, project_id: &str, script_id: &str) -> anyhow::Result<()> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_file(&project_path, "scripts");
         let mut scripts: Vec<Script> = read_json(&file)?.unwrap_or_default();
@@ -736,11 +949,7 @@ impl Db {
     }
 
     /// `todos.upsert` - insert or replace a todo by id; persist + reindex.
-    pub async fn todos_upsert(
-        &self,
-        project_id: &str,
-        todo: &Todo,
-    ) -> anyhow::Result<()> {
+    pub async fn todos_upsert(&self, project_id: &str, todo: &Todo) -> anyhow::Result<()> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_file(&project_path, "todos");
         let mut todos: Vec<Todo> = read_json(&file)?.unwrap_or_default();
@@ -755,11 +964,7 @@ impl Db {
     }
 
     /// `todos.delete` - remove by id; persist + reindex.
-    pub async fn todos_delete(
-        &self,
-        project_id: &str,
-        todo_id: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn todos_delete(&self, project_id: &str, todo_id: &str) -> anyhow::Result<()> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_file(&project_path, "todos");
         let mut todos: Vec<Todo> = read_json(&file)?.unwrap_or_default();
@@ -773,11 +978,7 @@ impl Db {
     }
 
     /// `todos.toggle` - flip the `done` flag on a todo; persist + reindex.
-    pub async fn todos_toggle(
-        &self,
-        project_id: &str,
-        todo_id: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn todos_toggle(&self, project_id: &str, todo_id: &str) -> anyhow::Result<()> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_file(&project_path, "todos");
         let mut todos: Vec<Todo> = read_json(&file)?.unwrap_or_default();
@@ -805,27 +1006,23 @@ impl Db {
             .await?;
 
         for t in todos {
-            sqlx::query(
-                "INSERT INTO todos_fts (project_id, todo_id, text) VALUES (?, ?, ?)",
-            )
-            .bind(project_id)
-            .bind(&t.id)
-            .bind(&t.text)
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query("INSERT INTO todos_fts (project_id, todo_id, text) VALUES (?, ?, ?)")
+                .bind(project_id)
+                .bind(&t.id)
+                .bind(&t.text)
+                .execute(&mut *tx)
+                .await?;
         }
 
         // `todos_count` is the *open* todos count - the UI shows "n
         let open_count = todos.iter().filter(|t| !t.done).count() as i64;
         let now = chrono::Utc::now().to_rfc3339();
-        sqlx::query(
-            "UPDATE projects SET todos_count = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(open_count)
-        .bind(now)
-        .bind(project_id)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("UPDATE projects SET todos_count = ?, updated_at = ? WHERE id = ?")
+            .bind(open_count)
+            .bind(now)
+            .bind(project_id)
+            .execute(&mut *tx)
+            .await?;
 
         tx.commit().await?;
         Ok(())
@@ -843,10 +1040,7 @@ impl Db {
     // =================================================================
 
     /// `pane_layout.get` - load the last-persisted layout for a project,
-    pub async fn pane_layout_get(
-        &self,
-        project_id: &str,
-    ) -> anyhow::Result<Option<PaneLayout>> {
+    pub async fn pane_layout_get(&self, project_id: &str) -> anyhow::Result<Option<PaneLayout>> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_file(&project_path, "panes");
         read_json::<PaneLayout>(&file)
@@ -979,15 +1173,12 @@ impl Db {
         project_ids: &[String],
     ) -> anyhow::Result<()> {
         // Verify the collection exists; silent inserts into a missing FK
-        let exists: Option<(String,)> =
-            sqlx::query_as("SELECT id FROM collections WHERE id = ?")
-                .bind(collection_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM collections WHERE id = ?")
+            .bind(collection_id)
+            .fetch_optional(&self.pool)
+            .await?;
         if exists.is_none() {
-            return Err(anyhow::anyhow!(
-                "unknown collection id: {collection_id}"
-            ));
+            return Err(anyhow::anyhow!("unknown collection id: {collection_id}"));
         }
 
         let mut tx = self.pool.begin().await?;
@@ -997,8 +1188,7 @@ impl Db {
             .execute(&mut *tx)
             .await?;
 
-        let mut seen: std::collections::HashSet<&str> =
-            std::collections::HashSet::new();
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for pid in project_ids {
             let p = pid.trim();
             if p.is_empty() || !seen.insert(p) {
@@ -1031,10 +1221,9 @@ impl Db {
         let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM collections")
             .fetch_one(&mut *tx)
             .await?;
-        let (max_ord,): (Option<i64>,) =
-            sqlx::query_as("SELECT MAX(ord) FROM collections")
-                .fetch_one(&mut *tx)
-                .await?;
+        let (max_ord,): (Option<i64>,) = sqlx::query_as("SELECT MAX(ord) FROM collections")
+            .fetch_one(&mut *tx)
+            .await?;
 
         let id = uuid::Uuid::new_v4().to_string();
         let ord = max_ord.map(|o| o + 1).unwrap_or(0);
@@ -1046,15 +1235,13 @@ impl Db {
             return Err(anyhow::anyhow!("collection label cannot be empty"));
         }
 
-        sqlx::query(
-            "INSERT INTO collections (id, label, dot, ord) VALUES (?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(label)
-        .bind(&dot)
-        .bind(ord)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("INSERT INTO collections (id, label, dot, ord) VALUES (?, ?, ?, ?)")
+            .bind(&id)
+            .bind(label)
+            .bind(&dot)
+            .bind(ord)
+            .execute(&mut *tx)
+            .await?;
 
         tx.commit().await?;
 
@@ -1084,11 +1271,7 @@ impl Db {
     }
 
     /// `collections.update_color` - update just the `dot` swatch.
-    pub async fn update_collection_color(
-        &self,
-        id: &str,
-        color: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn update_collection_color(&self, id: &str, color: &str) -> anyhow::Result<()> {
         let res = sqlx::query("UPDATE collections SET dot = ? WHERE id = ?")
             .bind(color)
             .bind(id)
@@ -1116,10 +1299,7 @@ impl Db {
     }
 
     /// `collections.reorder` - rewrite `ord` so the rows sort in the
-    pub async fn reorder_collections(
-        &self,
-        ordered_ids: &[String],
-    ) -> anyhow::Result<()> {
+    pub async fn reorder_collections(&self, ordered_ids: &[String]) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         for (i, id) in ordered_ids.iter().enumerate() {
             sqlx::query("UPDATE collections SET ord = ? WHERE id = ?")
@@ -1209,10 +1389,7 @@ impl Db {
                 return Ok(out);
             }
             Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "read {}: {err}",
-                    notes_dir.display()
-                ));
+                return Err(anyhow::anyhow!("read {}: {err}", notes_dir.display()));
             }
         };
 
@@ -1234,10 +1411,7 @@ impl Db {
                 Ok(Some(n)) => out.push(n),
                 Ok(None) => {}
                 Err(err) => {
-                    tracing::warn!(
-                        "skip malformed note {}: {err}",
-                        path.display()
-                    );
+                    tracing::warn!("skip malformed note {}: {err}", path.display());
                 }
             }
         }
@@ -1253,22 +1427,14 @@ impl Db {
     }
 
     /// `notes.get` - fetch a single note. `None` if the file is missing.
-    pub async fn notes_get(
-        &self,
-        project_id: &str,
-        note_id: &str,
-    ) -> anyhow::Result<Option<Note>> {
+    pub async fn notes_get(&self, project_id: &str, note_id: &str) -> anyhow::Result<Option<Note>> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_note_file(&project_path, note_id);
         read_json::<Note>(&file)
     }
 
     /// `notes.upsert` - write the note atomically and rebuild its row in
-    pub async fn notes_upsert(
-        &self,
-        project_id: &str,
-        note: &Note,
-    ) -> anyhow::Result<()> {
+    pub async fn notes_upsert(&self, project_id: &str, note: &Note) -> anyhow::Result<()> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_note_file(&project_path, &note.id);
         write_json(&file, note)?;
@@ -1279,11 +1445,7 @@ impl Db {
     }
 
     /// `notes.delete` - remove the JSON file + the FTS row + refresh
-    pub async fn notes_delete(
-        &self,
-        project_id: &str,
-        note_id: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn notes_delete(&self, project_id: &str, note_id: &str) -> anyhow::Result<()> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_note_file(&project_path, note_id);
 
@@ -1291,20 +1453,15 @@ impl Db {
             Ok(()) => {}
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
             Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "remove {}: {err}",
-                    file.display()
-                ));
+                return Err(anyhow::anyhow!("remove {}: {err}", file.display()));
             }
         }
 
-        sqlx::query(
-            "DELETE FROM notes_fts WHERE project_id = ? AND note_id = ?",
-        )
-        .bind(project_id)
-        .bind(note_id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("DELETE FROM notes_fts WHERE project_id = ? AND note_id = ?")
+            .bind(project_id)
+            .bind(note_id)
+            .execute(&self.pool)
+            .await?;
 
         self.refresh_notes_count(project_id, &project_path).await?;
         Ok(())
@@ -1319,9 +1476,8 @@ impl Db {
     ) -> anyhow::Result<()> {
         let project_path = self.project_path_for(project_id).await?;
         let file = atlas_note_file(&project_path, note_id);
-        let mut note: Note = read_json(&file)?.ok_or_else(|| {
-            anyhow::anyhow!("note {note_id} not found in project {project_id}")
-        })?;
+        let mut note: Note = read_json(&file)?
+            .ok_or_else(|| anyhow::anyhow!("note {note_id} not found in project {project_id}"))?;
         note.pinned = pinned;
         note.updated_at = chrono::Utc::now().to_rfc3339();
         write_json(&file, &note)?;
@@ -1331,25 +1487,20 @@ impl Db {
     }
 
     /// `notes.search` - FTS5 match over `title` + `body_plain`, hydrated
-    pub async fn notes_search(
-        &self,
-        project_id: &str,
-        query: &str,
-    ) -> anyhow::Result<Vec<Note>> {
+    pub async fn notes_search(&self, project_id: &str, query: &str) -> anyhow::Result<Vec<Note>> {
         let trimmed = query.trim();
         if trimmed.is_empty() {
             return Ok(Vec::new());
         }
-        let fts_query =
-            if trimmed.contains('"') || trimmed.contains('*') || trimmed.contains(':') {
-                trimmed.to_string()
-            } else {
-                trimmed
-                    .split_whitespace()
-                    .map(|w| format!("{}*", w))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            };
+        let fts_query = if trimmed.contains('"') || trimmed.contains('*') || trimmed.contains(':') {
+            trimmed.to_string()
+        } else {
+            trimmed
+                .split_whitespace()
+                .map(|w| format!("{}*", w))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
 
         let rows: Vec<(String,)> = sqlx::query_as(
             "SELECT note_id FROM notes_fts \
@@ -1374,20 +1525,14 @@ impl Db {
     }
 
     /// Replace (or insert) a single note's FTS row. Uses a delete-by
-    async fn resync_note_fts_row(
-        &self,
-        project_id: &str,
-        note: &Note,
-    ) -> anyhow::Result<()> {
+    async fn resync_note_fts_row(&self, project_id: &str, note: &Note) -> anyhow::Result<()> {
         let body_plain = html_to_plaintext(&note.body);
         let mut tx = self.pool.begin().await?;
-        sqlx::query(
-            "DELETE FROM notes_fts WHERE project_id = ? AND note_id = ?",
-        )
-        .bind(project_id)
-        .bind(&note.id)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("DELETE FROM notes_fts WHERE project_id = ? AND note_id = ?")
+            .bind(project_id)
+            .bind(&note.id)
+            .execute(&mut *tx)
+            .await?;
         sqlx::query(
             "INSERT INTO notes_fts (project_id, note_id, title, body_plain) \
              VALUES (?, ?, ?, ?)",
@@ -1430,21 +1575,16 @@ impl Db {
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
             Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "scan {}: {err}",
-                    notes_dir.display()
-                ));
+                return Err(anyhow::anyhow!("scan {}: {err}", notes_dir.display()));
             }
         }
         let now = chrono::Utc::now().to_rfc3339();
-        sqlx::query(
-            "UPDATE projects SET notes_count = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(count)
-        .bind(now)
-        .bind(project_id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE projects SET notes_count = ?, updated_at = ? WHERE id = ?")
+            .bind(count)
+            .bind(now)
+            .bind(project_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -1520,16 +1660,15 @@ impl Db {
         }
 
         // Build the FTS query - mirror the helper in `search_projects`.
-        let fts_query =
-            if trimmed.contains('"') || trimmed.contains('*') || trimmed.contains(':') {
-                trimmed.to_string()
-            } else {
-                trimmed
-                    .split_whitespace()
-                    .map(|w| format!("{}*", w))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            };
+        let fts_query = if trimmed.contains('"') || trimmed.contains('*') || trimmed.contains(':') {
+            trimmed.to_string()
+        } else {
+            trimmed
+                .split_whitespace()
+                .map(|w| format!("{}*", w))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
 
         // --- Projects (sorted by bm25 ascending) ---
         let project_rows = sqlx::query(
@@ -1606,9 +1745,8 @@ impl Db {
             .collect();
 
         // --- Merge in the kind-priority order specified in the brief ---
-        let mut out: Vec<PaletteItem> = Vec::with_capacity(
-            project_items.len() + note_items.len() + action_items.len(),
-        );
+        let mut out: Vec<PaletteItem> =
+            Vec::with_capacity(project_items.len() + note_items.len() + action_items.len());
         out.extend(project_items);
         out.extend(note_items);
         out.extend(action_items);
@@ -1619,11 +1757,10 @@ impl Db {
     /// Push a project to the top of the recents ring buffer.
     pub async fn recents_push(&self, project_id: &str) -> anyhow::Result<()> {
         // Verify the project exists (FK would reject otherwise, but a
-        let exists: Option<(String,)> =
-            sqlx::query_as("SELECT id FROM projects WHERE id = ?")
-                .bind(project_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM projects WHERE id = ?")
+            .bind(project_id)
+            .fetch_optional(&self.pool)
+            .await?;
         if exists.is_none() {
             return Err(anyhow::anyhow!("unknown project id: {project_id}"));
         }
@@ -1639,14 +1776,12 @@ impl Db {
         .await?;
 
         // Keep `projects.last_opened` in sync so the list view's "opened"
-        sqlx::query(
-            "UPDATE projects SET last_opened = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(&now)
-        .bind(&now)
-        .bind(project_id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE projects SET last_opened = ?, updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(&now)
+            .bind(project_id)
+            .execute(&self.pool)
+            .await?;
 
         // Trim to 20 - keep the newest, drop the tail.
         sqlx::query(
@@ -1664,12 +1799,11 @@ impl Db {
 
     /// List recents projects in LIFO order (most recent first), capped at
     pub async fn recents_list(&self, limit: u32) -> anyhow::Result<Vec<Project>> {
-        let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT project_id FROM recents ORDER BY opened_at DESC LIMIT ?",
-        )
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await?;
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT project_id FROM recents ORDER BY opened_at DESC LIMIT ?")
+                .bind(limit as i64)
+                .fetch_all(&self.pool)
+                .await?;
 
         let mut out = Vec::with_capacity(rows.len());
         for (pid,) in rows {
@@ -1720,13 +1854,12 @@ async fn fts_replace_project(
     tags_joined: &str,
 ) -> anyhow::Result<()> {
     // Best-effort delete. FTS5 'delete' command needs the OLD values of
-    let existing: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT name, path, tags FROM projects_fts WHERE rowid = ?",
-    )
-    .bind(rowid)
-    .fetch_optional(pool)
-    .await
-    .unwrap_or(None);
+    let existing: Option<(String, String, String)> =
+        sqlx::query_as("SELECT name, path, tags FROM projects_fts WHERE rowid = ?")
+            .bind(rowid)
+            .fetch_optional(pool)
+            .await
+            .unwrap_or(None);
 
     if let Some((old_name, old_path, old_tags)) = existing {
         sqlx::query(
@@ -1771,9 +1904,7 @@ fn escape_like(s: &str) -> String {
 /// Deterministic 12-char lowercase hex slug for a path.
 pub fn project_id_for_path(path: &Path) -> String {
     // Try canonicalize; fall back to the raw path so missing paths still
-    let canonical = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let bytes = canonical.as_os_str().to_string_lossy();
     let h = fnv1a_64(bytes.as_bytes());
     format!("{:012x}", h & 0x0000_FFFF_FFFF_FFFF)
@@ -1893,11 +2024,7 @@ pub(crate) fn html_to_plaintext(html: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'&' {
             // Find the terminating ';' within a small window - entities
-            if let Some(end_rel) = stripped[i + 1..]
-                .bytes()
-                .take(12)
-                .position(|b| b == b';')
-            {
+            if let Some(end_rel) = stripped[i + 1..].bytes().take(12).position(|b| b == b';') {
                 let end = i + 1 + end_rel;
                 let entity = &stripped[i + 1..end];
                 let replacement: Option<char> = match entity {
@@ -2066,7 +2193,6 @@ mod tests {
         assert!(format_size(2 * 1_073_741_824).ends_with("GB"));
     }
 
-
     /// Build a throwaway directory containing N fake `.git`-bearing dirs
     fn mkrepo_tree(tag: &str, repos: &[(&str, &[&str])]) -> std::path::PathBuf {
         use std::fs;
@@ -2154,7 +2280,6 @@ mod tests {
         assert!(!reverted.pinned);
         Ok(())
     }
-
 
     /// Seed fixtures pre-pin `hawthorn`; unpin it so the reorder tests
     async fn unpin_all_seeded(db: &Db) -> anyhow::Result<()> {
@@ -2272,10 +2397,9 @@ mod tests {
 
         // Unpin → pin_ord must be cleared so a later re-pin doesn't
         db.pin_project("acorn", false).await?;
-        let ord: (Option<i64>,) =
-            sqlx::query_as("SELECT pin_ord FROM projects WHERE id = 'acorn'")
-                .fetch_one(db.pool())
-                .await?;
+        let ord: (Option<i64>,) = sqlx::query_as("SELECT pin_ord FROM projects WHERE id = 'acorn'")
+            .fetch_one(db.pool())
+            .await?;
         assert_eq!(ord.0, None);
         Ok(())
     }
@@ -2298,8 +2422,11 @@ mod tests {
         assert!(hits.iter().any(|p| p.id == "cedar"));
 
         // set_tags replaces the tag set
-        db.set_tags("cedar", &["rewrite".into(), "rewrite".into(), "".into(), "wip".into()])
-            .await?;
+        db.set_tags(
+            "cedar",
+            &["rewrite".into(), "rewrite".into(), "".into(), "wip".into()],
+        )
+        .await?;
         let p = db.get_project("cedar").await?.unwrap();
         // Duplicates collapsed; empty dropped; alpha order from hydrate.
         assert_eq!(p.tags, vec!["rewrite".to_string(), "wip".to_string()]);
@@ -2325,7 +2452,10 @@ mod tests {
         assert_eq!(watchers[0].1, 4);
 
         let inserted = db.seed_fixtures().await?;
-        assert_eq!(inserted, 0, "seed must not run when a watcher is configured");
+        assert_eq!(
+            inserted, 0,
+            "seed must not run when a watcher is configured"
+        );
 
         // Remove the watcher; seed now runs.
         db.remove_watcher(Path::new("/tmp/atlas-code")).await?;
@@ -2340,8 +2470,13 @@ mod tests {
         db.seed_fixtures().await?;
         // Seed projects live under `~/code/...` synthetic paths.
         let n = db.count_projects_under(Path::new("~/code/work")).await?;
-        assert!(n >= 5, "expected at least 5 projects under ~/code/work, got {n}");
-        let m = db.count_projects_under(Path::new("~/code/personal")).await?;
+        assert!(
+            n >= 5,
+            "expected at least 5 projects under ~/code/work, got {n}"
+        );
+        let m = db
+            .count_projects_under(Path::new("~/code/personal"))
+            .await?;
         assert!(m >= 2);
         Ok(())
     }
@@ -2416,7 +2551,6 @@ mod tests {
         assert_eq!(p.author.as_deref(), Some("Ada Lovelace"));
         Ok(())
     }
-
 
     use crate::storage::types::{ScriptGroup, Todo};
 
@@ -2498,7 +2632,10 @@ mod tests {
     async fn scripts_unknown_project_errors() -> anyhow::Result<()> {
         let db = Db::open_in_memory().await?;
         let err = db.scripts_list("does-not-exist").await;
-        assert!(err.is_err(), "unknown project must error, not silently no-op");
+        assert!(
+            err.is_err(),
+            "unknown project must error, not silently no-op"
+        );
         Ok(())
     }
 
@@ -2584,25 +2721,22 @@ mod tests {
 
         // After delete the row is gone from FTS (replace-all strategy).
         db.todos_delete(&pid, "a").await?;
-        let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT todo_id FROM todos_fts WHERE todos_fts MATCH 'clippy*'",
-        )
-        .fetch_all(db.pool())
-        .await?;
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT todo_id FROM todos_fts WHERE todos_fts MATCH 'clippy*'")
+                .fetch_all(db.pool())
+                .await?;
         assert!(rows.is_empty(), "deleted todo must not linger in FTS");
 
         // The remaining 'release notes' todo is still searchable.
-        let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT todo_id FROM todos_fts WHERE todos_fts MATCH 'release*'",
-        )
-        .fetch_all(db.pool())
-        .await?;
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT todo_id FROM todos_fts WHERE todos_fts MATCH 'release*'")
+                .fetch_all(db.pool())
+                .await?;
         assert_eq!(rows.len(), 1);
 
         std::fs::remove_dir_all(project_path.parent().unwrap()).ok();
         Ok(())
     }
-
 
     use crate::storage::types::Note;
 
@@ -2724,14 +2858,17 @@ mod tests {
         // Delete: file + FTS row gone.
         db.notes_delete(&pid, "a").await?;
         let note_file = project_path.join(".atlas/notes/a.json");
-        assert!(!note_file.exists(), "{} should be gone", note_file.display());
-        let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT note_id FROM notes_fts WHERE project_id = ? AND note_id = ?",
-        )
-        .bind(&pid)
-        .bind("a")
-        .fetch_all(db.pool())
-        .await?;
+        assert!(
+            !note_file.exists(),
+            "{} should be gone",
+            note_file.display()
+        );
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT note_id FROM notes_fts WHERE project_id = ? AND note_id = ?")
+                .bind(&pid)
+                .bind("a")
+                .fetch_all(db.pool())
+                .await?;
         assert!(rows.is_empty(), "deleted note must not linger in FTS");
 
         // Count refreshed.
@@ -2778,25 +2915,18 @@ mod tests {
             "hello world"
         );
         // Adjacent tags get a space so words don't glue together.
-        assert_eq!(
-            html_to_plaintext("<p>foo</p><p>bar</p>"),
-            "foo bar"
-        );
+        assert_eq!(html_to_plaintext("<p>foo</p><p>bar</p>"), "foo bar");
         // Entities decoded.
         assert_eq!(
             html_to_plaintext("&amp; &lt; &gt; &quot; &#39; &nbsp;"),
             "& < > \" '"
         );
         // Numeric entity (curly apostrophe).
-        assert_eq!(
-            html_to_plaintext("it&#8217;s fine"),
-            "it\u{2019}s fine"
-        );
+        assert_eq!(html_to_plaintext("it&#8217;s fine"), "it\u{2019}s fine");
         // Empty / whitespace-only.
         assert_eq!(html_to_plaintext(""), "");
         assert_eq!(html_to_plaintext("   \n\t  "), "");
     }
-
 
     #[tokio::test]
     async fn collection_members_set_and_list_roundtrip() -> anyhow::Result<()> {
@@ -2829,14 +2959,11 @@ mod tests {
         assert!(db.list_collection_members("work").await?.is_empty());
 
         // Unknown collection errors.
-        let err = db
-            .set_collection_members("ghost", &["acorn".into()])
-            .await;
+        let err = db.set_collection_members("ghost", &["acorn".into()]).await;
         assert!(err.is_err());
 
         Ok(())
     }
-
 
     #[tokio::test]
     async fn palette_source_finds_seeded_project() -> anyhow::Result<()> {
@@ -2845,9 +2972,9 @@ mod tests {
 
         let items = db.palette_source("birch", 10).await?;
         assert!(!items.is_empty(), "expected at least one palette hit");
-        let found_birch = items.iter().any(|i| {
-            matches!(i, PaletteItem::Project { project, .. } if project.id == "birch")
-        });
+        let found_birch = items
+            .iter()
+            .any(|i| matches!(i, PaletteItem::Project { project, .. } if project.id == "birch"));
         assert!(found_birch, "birch should appear for query 'birch'");
 
         Ok(())
@@ -3018,7 +3145,6 @@ mod tests {
         Ok(())
     }
 
-
     use crate::storage::types::{PaneLayout, PaneSnapshot};
 
     #[tokio::test]
@@ -3087,7 +3213,10 @@ mod tests {
     async fn pane_layout_unknown_project_errors() -> anyhow::Result<()> {
         let db = Db::open_in_memory().await?;
         let err = db.pane_layout_get("does-not-exist").await;
-        assert!(err.is_err(), "unknown project must error, not silently no-op");
+        assert!(
+            err.is_err(),
+            "unknown project must error, not silently no-op"
+        );
         Ok(())
     }
 }

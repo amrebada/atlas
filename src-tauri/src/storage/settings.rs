@@ -34,10 +34,7 @@ pub fn settings_path(app_data_dir: &Path) -> PathBuf {
 /// Default project location - `$HOME/code` if `$HOME` is set, else empty
 fn default_project_location() -> String {
     match std::env::var("HOME") {
-        Ok(h) if !h.is_empty() => PathBuf::from(h)
-            .join("code")
-            .to_string_lossy()
-            .into_owned(),
+        Ok(h) if !h.is_empty() => PathBuf::from(h).join("code").to_string_lossy().into_owned(),
         _ => String::new(),
     }
 }
@@ -117,10 +114,7 @@ pub async fn save(app_data_dir: &Path, settings: &Settings) -> anyhow::Result<()
 }
 
 /// Apply a shallow-merge patch and persist the result. Returns the newly
-pub async fn apply_patch(
-    app_data_dir: &Path,
-    patch: Value,
-) -> anyhow::Result<Settings> {
+pub async fn apply_patch(app_data_dir: &Path, patch: Value) -> anyhow::Result<Settings> {
     let Value::Object(patch_map) = patch else {
         return Err(anyhow::anyhow!(
             "settings patch must be a JSON object, got {}",
@@ -149,9 +143,8 @@ pub async fn apply_patch(
         }
     }
 
-    let merged: Settings = serde_json::from_value(as_value).map_err(|e| {
-        anyhow::anyhow!("invalid settings patch: {e}")
-    })?;
+    let merged: Settings = serde_json::from_value(as_value)
+        .map_err(|e| anyhow::anyhow!("invalid settings patch: {e}"))?;
 
     // Persist the stripped form; return the view-friendly form.
     save(app_data_dir, &merged).await?;
@@ -177,7 +170,8 @@ fn with_builtin_templates(mut s: Settings) -> Settings {
     let builtins = builtin_templates();
     let builtin_ids: std::collections::HashSet<&str> =
         builtins.iter().map(|t| t.id.as_str()).collect();
-    s.templates.retain(|t| !t.builtin && !builtin_ids.contains(t.id.as_str()));
+    s.templates
+        .retain(|t| !t.builtin && !builtin_ids.contains(t.id.as_str()));
     let mut all: Vec<Template> = builtins;
     all.extend(s.templates);
     s.templates = all;
@@ -244,7 +238,10 @@ mod tests {
         assert!(s.advanced.crash_reports);
         assert!(!s.advanced.use_spotlight);
         assert!(!s.shortcuts.is_empty());
-        assert_eq!(s.shortcuts.get("palette").map(String::as_str), Some("Mod+K"));
+        assert_eq!(
+            s.shortcuts.get("palette").map(String::as_str),
+            Some("Mod+K")
+        );
 
         // File was created.
         assert!(settings_path(&dir).exists());
@@ -299,11 +296,9 @@ mod tests {
             .and_then(|t| t.as_array())
             .expect("templates array");
         assert!(
-            templates.iter().all(|t| {
-                !t.get("builtin")
-                    .and_then(|b| b.as_bool())
-                    .unwrap_or(true)
-            }),
+            templates
+                .iter()
+                .all(|t| { !t.get("builtin").and_then(|b| b.as_bool()).unwrap_or(true) }),
             "on-disk templates array should contain zero builtins, got {:?}",
             templates
         );

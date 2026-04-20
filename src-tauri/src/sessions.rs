@@ -349,7 +349,11 @@ fn extract_user_text(content: Option<&Value>) -> Option<String> {
                     }
                 }
             }
-            if buf.is_empty() { None } else { Some(buf) }
+            if buf.is_empty() {
+                None
+            } else {
+                Some(buf)
+            }
         }
         _ => None,
     }

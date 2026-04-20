@@ -9,9 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use notify::{RecommendedWatcher, Watcher};
-use notify_debouncer_full::{
-    new_debouncer, DebounceEventResult, Debouncer, FileIdMap,
-};
+use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 use serde_json::json;
 use tauri::AppHandle;
 
@@ -128,13 +126,9 @@ impl WatcherManager {
 
         // NB: we intentionally do NOT call `debouncer.cache().add_root(…)` here.
 
-        inner.roots.insert(
-            canonical.clone(),
-            Root {
-                debouncer,
-                depth,
-            },
-        );
+        inner
+            .roots
+            .insert(canonical.clone(), Root { debouncer, depth });
         tracing::info!(
             path = %canonical.display(),
             depth,
@@ -163,15 +157,14 @@ impl WatcherManager {
         let manager = self.clone();
         // Spawn on the rayon pool so the DB read doesn't block a tokio task.
         self.pool.spawn(move || {
-            let paths = match tauri::async_runtime::block_on(async move {
-                db.all_project_paths().await
-            }) {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(error = %e, "Db::all_project_paths failed");
-                    return;
-                }
-            };
+            let paths =
+                match tauri::async_runtime::block_on(async move { db.all_project_paths().await }) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Db::all_project_paths failed");
+                        return;
+                    }
+                };
             tracing::info!(count = paths.len(), "queueing initial git-status refresh");
             for path in paths {
                 manager.spawn_git_status(path);
@@ -186,9 +179,8 @@ impl WatcherManager {
         let app = self.app.clone();
         let root_str = root.to_string_lossy().into_owned();
         self.pool.spawn(move || {
-            let paths = match tauri::async_runtime::block_on(async {
-                db.all_project_paths().await
-            }) {
+            let paths = match tauri::async_runtime::block_on(async { db.all_project_paths().await })
+            {
                 Ok(all) => all
                     .into_iter()
                     .filter(|p| p.starts_with(&root) || p == &root)
@@ -242,9 +234,7 @@ impl WatcherManager {
                             tracing::warn!(error = %e, id = %id, "apply_git_status");
                         }
                     }
-                    let n = done
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                        + 1;
+                    let n = done.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                     let _ = events::emit_discovery_progress(
                         &app,
                         &root_str,
