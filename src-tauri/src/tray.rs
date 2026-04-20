@@ -53,7 +53,9 @@ pub fn set_enabled<R: Runtime>(app: &AppHandle<R>, enabled: bool, recents: Vec<P
         }
     } else {
         app.remove_tray_by_id(TRAY_ID);
-        recents_map().lock().ok().map(|mut m| m.clear());
+        if let Ok(mut m) = recents_map().lock() {
+            m.clear();
+        }
     }
 }
 

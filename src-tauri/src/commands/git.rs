@@ -385,9 +385,9 @@ mod tests {
 
         // Switch back to the original branch (commonly `main` or `master`).
         let default_branch_name = {
-            let mut local = repo.branches(Some(BranchType::Local))?;
+            let local = repo.branches(Some(BranchType::Local))?;
             let mut name: Option<String> = None;
-            while let Some(b) = local.next() {
+            for b in local {
                 let (br, _) = b?;
                 if let Ok(Some(n)) = br.name() {
                     if n != "feature" {

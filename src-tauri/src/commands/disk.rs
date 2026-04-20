@@ -231,7 +231,7 @@ fn scan_tree(project_path: &Path) -> anyhow::Result<DiskScanResult> {
         })
         .collect();
 
-    rows.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    rows.sort_by_key(|b| std::cmp::Reverse(b.bytes));
     rows.truncate(10);
     Ok(DiskScanResult {
         total_bytes: project_total,
