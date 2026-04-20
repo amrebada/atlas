@@ -1,5 +1,5 @@
   #!/usr/bin/env bash
-  # bump-version.sh — usage: ./bump-version.sh <patch|minor|major|X.Y.Z>
+  # bump-version.sh — usage: BUMP=<patch|minor|major|X.Y.Z> ./bump-version.sh
   set -euo pipefail
 
   ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,8 +11,8 @@
     [[ -f "$f" ]] || { echo "missing: $f" >&2; exit 1; }
   done
 
-  arg="${1:-}"
-  [[ -z "$arg" ]] && { echo "usage: $0 <patch|minor|major|X.Y.Z>" >&2; exit 1; }
+  arg="${BUMP:-}"
+  [[ -z "$arg" ]] && { echo "usage: BUMP=<patch|minor|major|X.Y.Z> $0" >&2; exit 1; }
 
   current=$(sed -nE 's/.*"version":[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' "$PKG" | head -n1)
   [[ -z "$current" ]] && { echo "could not read current version from $PKG" >&2; exit 1; }
@@ -34,16 +34,23 @@
 
   echo "bumping $current -> $new"
 
-  # macOS/BSD sed compatible (works on Linux too when -i '' is used)
-  SED_INPLACE=(-i '')
-  [[ "$(uname)" == "Linux" ]] && SED_INPLACE=(-i)
+  # Replace only the FIRST `"version": "..."` occurrence in a JSON file.
+  # Uses awk because BSD sed (macOS) silently no-ops `0,/re/s//x/` — the
+  # GNU-only first-match trick — leaving the file unchanged without error.
+  json_bump_version() {
+    local file="$1"
+    awk -v new="$new" '
+      !done && /"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"/ {
+        sub(/"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"/,
+            "\"version\": \"" new "\"")
+        done=1
+      }
+      { print }
+    ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+  }
 
-  # package.json: first "version": "..."
-  sed "${SED_INPLACE[@]}" -E "0,/\"version\":[[:space:]]*\"[^\"]+\"/s//\"version\": \"$new\"/" "$PKG" 2>/dev/null \
-    || sed "${SED_INPLACE[@]}" -E "s/\"version\":[[:space:]]*\"$current\"/\"version\": \"$new\"/" "$PKG"
-
-  # tauri.conf.json: "version": "..."
-  sed "${SED_INPLACE[@]}" -E "s/\"version\":[[:space:]]*\"$current\"/\"version\": \"$new\"/" "$TAURI"
+  json_bump_version "$PKG"
+  json_bump_version "$TAURI"
 
   # Cargo.toml: top-level version = "..." (only first occurrence, under [package])
   awk -v new="$new" '
