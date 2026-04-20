@@ -239,6 +239,20 @@ export const revealInFinder = (projectId: string) =>
 export const scriptsRun = (projectId: string, scriptIds: string[]) =>
   invoke<string[]>("scripts_run", { projectId, scriptIds });
 
+/** Single script invocation with user-edited env overrides. */
+export interface ScriptInvocation {
+  scriptId: string;
+  env: Array<[string, string]>;
+}
+
+/** Spawn scripts carrying per-invocation env overrides (from the
+ *  run-env modal). Falls back identical to {@link scriptsRun} when
+ *  `env` is empty. */
+export const scriptsRunWithEnv = (
+  projectId: string,
+  invocations: ScriptInvocation[],
+) => invoke<string[]>("scripts_run_with_env", { projectId, invocations });
+
 
 /** Request shape for `terminal_open`. */
 export interface TerminalOpenRequest {

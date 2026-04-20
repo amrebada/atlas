@@ -61,6 +61,7 @@ export function NewProjectModal() {
   const state = useUiStore((s) => s.newProjectOpen);
   const close = useUiStore((s) => s.closeNewProject);
   const pushToast = useUiStore((s) => s.pushToast);
+  const setSelectedProjectId = useUiStore((s) => s.setSelectedProjectId);
   const queryClient = useQueryClient();
 
   const [tab, setTab] = useState<NewProjectTab>(state?.tab ?? "new");
@@ -130,7 +131,6 @@ export function NewProjectModal() {
     }
   };
 
-  const setSelectedProjectId = useUiStore((s) => s.setSelectedProjectId);
   const handleCreate = async () => {
     const trimmed = name.trim();
     const parent = location.trim();

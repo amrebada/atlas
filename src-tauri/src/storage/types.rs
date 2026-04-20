@@ -161,6 +161,13 @@ pub struct Project {
     pub size: String,
     #[ts(type = "number")]
     pub size_bytes: i64,
+    /// Pretty-printed on-disk size, e.g. `"16.4 GB"`. Matches
+    /// `disk_bytes` formatting via `util::format_bytes`.
+    pub disk_size: String,
+    /// Full on-disk footprint including files `.gitignore` hides
+    /// (`node_modules`, build outputs). Always ≥ `size_bytes`.
+    #[ts(type = "number")]
+    pub disk_bytes: i64,
     pub last_opened: Option<String>,
     pub pinned: bool,
     pub tags: Vec<String>,
@@ -220,6 +227,13 @@ pub struct Note {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/rust.ts")]
+pub struct ScriptEnvVar {
+    pub key: String,
+    pub default: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/rust.ts")]
 pub struct Script {
     pub id: ScriptId,
     pub name: String,
@@ -231,6 +245,8 @@ pub struct Script {
     pub default: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env_defaults: Vec<ScriptEnvVar>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

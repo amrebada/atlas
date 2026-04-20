@@ -2,11 +2,23 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::scripts;
 use crate::storage::types::Script;
 use crate::storage::Db;
+
+/// Per-script invocation payload for `scripts_run_with_env`. Lets the
+/// frontend supply user-edited env values (from the run-env modal) on
+/// top of the script's stored defaults.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptInvocation {
+    pub script_id: String,
+    #[serde(default)]
+    pub env: Vec<(String, String)>,
+}
 
 /// `scripts.list` - return the merged script set for a project.
 #[tauri::command]
@@ -80,10 +92,52 @@ pub async fn scripts_run(
             .iter()
             .find(|s| &s.id == sid)
             .ok_or_else(|| format!("unknown script id: {sid}"))?;
-        let invocation = scripts::run(&app, &project_id, script, &project_path)
+        let env = script
+            .env_defaults
+            .iter()
+            .map(|v| (v.key.clone(), v.default.clone()))
+            .collect();
+        let invocation = scripts::run(&app, &project_id, script, &project_path, env)
             .await
             .map_err(|e| format!("spawn {}: {e}", script.name))?;
         invocation_ids.push(invocation);
+    }
+
+    Ok(invocation_ids)
+}
+
+/// `scripts.runWithEnv` - like `scripts_run` but each invocation carries
+/// a user-supplied env map that overrides the script's stored defaults.
+#[tauri::command]
+pub async fn scripts_run_with_env(
+    app: AppHandle,
+    state: State<'_, Db>,
+    project_id: String,
+    invocations: Vec<ScriptInvocation>,
+) -> Result<Vec<String>, String> {
+    let project_path = resolve_project_path(&state, &project_id).await?;
+
+    let stored = state
+        .scripts_list(&project_id)
+        .await
+        .map_err(|e: anyhow::Error| e.to_string())?;
+    let parsed = if stored.is_empty() {
+        scripts::discover_scripts(&project_path).map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
+    };
+
+    let pool: Vec<&Script> = stored.iter().chain(parsed.iter()).collect();
+    let mut invocation_ids = Vec::with_capacity(invocations.len());
+    for inv in &invocations {
+        let script = pool
+            .iter()
+            .find(|s| s.id == inv.script_id)
+            .ok_or_else(|| format!("unknown script id: {}", inv.script_id))?;
+        let id = scripts::run(&app, &project_id, script, &project_path, inv.env.clone())
+            .await
+            .map_err(|e| format!("spawn {}: {e}", script.name))?;
+        invocation_ids.push(id);
     }
 
     Ok(invocation_ids)

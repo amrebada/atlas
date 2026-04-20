@@ -36,9 +36,12 @@ export function ProjectList({
   );
 
   // Pass 3 - grid template flips based on whether the AUTHOR column is
+  // shown. The SIZE column is wider than it was (was 70px) so that rows
+  // with significant on-disk bloat can render both the source size and
+  // a compact `+16G` delta without crowding neighbouring columns.
   const gridTemplate = showAuthor
-    ? "24px 1.6fr 1fr 120px 80px 70px 70px 80px"
-    : "24px 1.6fr 1fr 80px 70px 70px 80px";
+    ? "24px 1.6fr 1fr 120px 80px 110px 70px 80px"
+    : "24px 1.6fr 1fr 80px 110px 70px 80px";
 
   const renameMut = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
@@ -194,12 +197,7 @@ export function ProjectList({
             >
               {p.loc.toLocaleString()}
             </span>
-            <span
-              className="text-right font-mono text-[11px] text-text-dim"
-              title={`${p.sizeBytes.toLocaleString()} bytes`}
-            >
-              {p.size}
-            </span>
+            <SizeCell project={p} />
             <span
               className="text-right font-mono text-[11px]"
               style={{
@@ -237,6 +235,66 @@ export function ProjectList({
       />
     </div>
   );
+}
+
+// Size cell: shows source size, plus a `+16G` bloat chip when the on-disk
+// footprint meaningfully exceeds the gitignored source. The `title`
+// attribute carries the full breakdown (source / on-disk / excess) so
+// users who hover get the exact numbers without widening the column.
+function SizeCell({ project }: { project: Project }) {
+  const excess = Math.max(0, project.diskBytes - project.sizeBytes);
+  // Threshold: don't flag < 50 MB of extra data; those are lockfiles,
+  // small caches, pre-commit hooks — nothing worth warning about.
+  const showBloat = excess > 50 * 1024 * 1024;
+  const title = showBloat
+    ? `Source: ${project.size} (${project.sizeBytes.toLocaleString()} bytes)\n` +
+      `On disk: ${project.diskSize} (${project.diskBytes.toLocaleString()} bytes)\n` +
+      `Excess: ${formatBytesVerbose(excess)} — gitignored files (node_modules, build outputs, caches)`
+    : `${project.sizeBytes.toLocaleString()} bytes`;
+
+  return (
+    <span
+      className="text-right font-mono text-[11px] text-text-dim flex items-center justify-end gap-[4px]"
+      title={title}
+    >
+      <span>{project.size}</span>
+      {showBloat && (
+        <span
+          className="inline-flex items-center font-mono text-[10px] px-[3px] rounded-[2px]"
+          style={{
+            color: "var(--warn, #d97757)",
+            background: "color-mix(in oklch, var(--warn, #d97757) 12%, transparent)",
+          }}
+        >
+          +{formatBytesCompact(excess)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function formatBytesCompact(n: number): string {
+  if (n < 1024) return `${n}B`;
+  const units = ["K", "M", "G", "T"] as const;
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return v >= 10 ? `${Math.round(v)}${units[i]}` : `${v.toFixed(1)}${units[i]}`;
+}
+
+function formatBytesVerbose(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"] as const;
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
 }
 
 // Tiny controlled input for inline row renames. Auto-focuses + selects on

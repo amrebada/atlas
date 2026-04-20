@@ -238,36 +238,35 @@ export function TerminalStrip({
           <LayoutBtn
             active={layout === "tabs"}
             onClick={() => setLayout("tabs")}
-            title="Tabs only"
+            title="Tabs"
           >
-            <rect x="2" y="3" width="12" height="2" />
-            <rect x="2" y="7" width="12" height="6" fill="currentColor" opacity=".4" />
+            {/* A small tab on top, one content pane below. */}
+            <rect x="2" y="5" width="12" height="9" rx="1" />
+            <path d="M4 5V3h4v2" />
           </LayoutBtn>
           <LayoutBtn
             active={layout === "split-v"}
             onClick={() => setLayout("split-v")}
             title="Vertical split"
           >
-            <rect x="2" y="2" width="5.5" height="12" fill="currentColor" opacity=".4" />
-            <rect x="8.5" y="2" width="5.5" height="12" fill="currentColor" opacity=".4" />
+            <rect x="2" y="3" width="12" height="10" rx="1" />
+            <path d="M8 3v10" />
           </LayoutBtn>
           <LayoutBtn
             active={layout === "split-h"}
             onClick={() => setLayout("split-h")}
             title="Horizontal split"
           >
-            <rect x="2" y="2" width="12" height="5.5" fill="currentColor" opacity=".4" />
-            <rect x="2" y="8.5" width="12" height="5.5" fill="currentColor" opacity=".4" />
+            <rect x="2" y="3" width="12" height="10" rx="1" />
+            <path d="M2 8h12" />
           </LayoutBtn>
           <LayoutBtn
             active={layout === "grid"}
             onClick={() => setLayout("grid")}
-            title="Grid (3+ panes)"
+            title="Grid"
           >
-            <rect x="2" y="2" width="5.5" height="5.5" fill="currentColor" opacity=".4" />
-            <rect x="8.5" y="2" width="5.5" height="5.5" fill="currentColor" opacity=".4" />
-            <rect x="2" y="8.5" width="5.5" height="5.5" fill="currentColor" opacity=".4" />
-            <rect x="8.5" y="8.5" width="5.5" height="5.5" fill="currentColor" opacity=".4" />
+            <rect x="2" y="3" width="12" height="10" rx="1" />
+            <path d="M2 8h12M8 3v10" />
           </LayoutBtn>
         </div>
 
@@ -642,7 +641,9 @@ function LayoutBtn({
         height="14"
         viewBox="0 0 16 16"
         stroke="currentColor"
-        strokeWidth="1"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         fill="none"
       >
         {children}

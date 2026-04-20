@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Icon } from "../../components/Icon";
+import atlasIconUrl from "../../assets/atlas-icon.png";
 import {
   addWatcher,
   detectEditors,
@@ -1026,25 +1027,13 @@ function AboutSection() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: 10,
-              background: "var(--accent)",
-              color: "var(--accent-fg)",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontFamily: "var(--mono)",
-              fontWeight: 700,
-              fontSize: 18,
-              letterSpacing: 0.5,
-            }}
-            aria-hidden
-          >
-            A
-          </div>
+          <img
+            src={atlasIconUrl}
+            alt="Atlas"
+            width={42}
+            height={42}
+            style={{ borderRadius: 10, display: "block" }}
+          />
           <div>
             <div style={{ fontSize: 16, fontWeight: 600 }}>Atlas</div>
             <div
