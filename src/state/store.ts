@@ -44,6 +44,7 @@ export interface DiscoveryProgress {
 export interface UiState {
   /** Core appearance. */
   theme: Theme;
+  terminalTheme: Theme;
   density: Density;
   font: Font;
 
@@ -92,6 +93,7 @@ export interface UiState {
 
   /** Setters. Plain field setters kept explicit for call-site clarity. */
   setTheme: (t: Theme) => void;
+  setTerminalTheme: (t: Theme) => void;
   setDensity: (d: Density) => void;
   setFont: (f: Font) => void;
   setViewMode: (v: ViewMode) => void;
@@ -145,6 +147,7 @@ export type SettingsSection =
 
 export const useUiStore = create<UiState>((set) => ({
   theme: "dark",
+  terminalTheme: "system",
   density: "dense",
   font: "plex",
   viewMode: "list",
@@ -171,6 +174,7 @@ export const useUiStore = create<UiState>((set) => ({
   multiSelect: { active: false, ids: [] },
 
   setTheme: (theme) => set({ theme }),
+  setTerminalTheme: (terminalTheme) => set({ terminalTheme }),
   setDensity: (density) => set({ density }),
   setFont: (font) => set({ font }),
   setViewMode: (viewMode) => set({ viewMode }),
