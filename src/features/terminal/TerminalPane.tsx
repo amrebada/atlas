@@ -24,6 +24,7 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
     let dataUnlisten: UnlistenFn | null = null;
     let exitUnlisten: UnlistenFn | null = null;
     let resizeObs: ResizeObserver | null = null;
+    let themeObs: MutationObserver | null = null;
     let opened = false; // term.open() has been called AND container had non-zero dims
     const pendingChunks: string[] = []; // buffered PTY output until we're opened
 
@@ -141,6 +142,14 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
       });
       resizeObs.observe(hostRef.current);
 
+      themeObs = new MutationObserver(() => {
+        if (term) term.options.theme = readTheme();
+      });
+      themeObs.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-term-theme"],
+      });
+
       // Defer the initial open() to rAF so StrictMode's dev-mode
       requestAnimationFrame(() => {
         if (disposed) return;
@@ -151,6 +160,7 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
     return () => {
       disposed = true;
       if (resizeObs) resizeObs.disconnect();
+      if (themeObs) themeObs.disconnect();
       if (dataUnlisten) dataUnlisten();
       if (exitUnlisten) exitUnlisten();
       // xterm.js stores a WebGL/canvas context - disposing is mandatory.
@@ -201,11 +211,14 @@ function readTheme(): import("xterm").ITheme {
     }
   };
   return {
-    background: resolve("--bg", "#111111"),
-    foreground: resolve("--text", "#eeeeee"),
-    cursor: resolve("--accent", "#7c7fee"),
-    cursorAccent: resolve("--accent-fg", "#111111"),
-    selectionBackground: "rgba(124, 127, 238, 0.25)",
+    background: resolve("--term-bg", "#111111"),
+    foreground: resolve("--term-fg", "#eeeeee"),
+    cursor: resolve("--term-cursor", "#7c7fee"),
+    cursorAccent: resolve("--term-cursor-fg", "#111111"),
+    selectionBackground: resolve(
+      "--term-selection-bg",
+      "rgba(124, 127, 238, 0.25)",
+    ),
     selectionForeground: undefined,
   };
 }
