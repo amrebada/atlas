@@ -394,6 +394,12 @@ pub struct GeneralSettings {
     pub menu_bar_agent: bool,
     pub default_project_location: String,
     pub theme: Theme,
+    #[serde(default = "default_terminal_theme")]
+    pub terminal_theme: Theme,
+}
+
+fn default_terminal_theme() -> Theme {
+    Theme::System
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -111,7 +111,7 @@ status: string | null, delta: string | null, };
  */
 export type FullLiteral = "full";
 
-export type GeneralSettings = { launchAtLogin: boolean, menuBarAgent: boolean, defaultProjectLocation: string, theme: Theme, };
+export type GeneralSettings = { launchAtLogin: boolean, menuBarAgent: boolean, defaultProjectLocation: string, theme: Theme, terminalTheme: Theme, };
 
 /**
  * Result of a mutating git action - surfaces the exit code and the raw

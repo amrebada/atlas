@@ -63,6 +63,7 @@ pub fn default_settings() -> Settings {
             menu_bar_agent: true,
             default_project_location: default_project_location(),
             theme: Theme::System,
+            terminal_theme: Theme::System,
         },
         editors: EditorsSettings {
             detected: Vec::new(),
@@ -248,6 +249,18 @@ mod tests {
 
         // Built-ins present.
         assert!(s.templates.iter().any(|t| t.builtin && t.id == "node-ts"));
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn default_terminal_theme_is_system() -> anyhow::Result<()> {
+        let dir = unique_dir("terminal-theme-default");
+        std::fs::create_dir_all(&dir)?;
+
+        let s = load(&dir).await?;
+        assert!(matches!(s.general.terminal_theme, Theme::System));
 
         std::fs::remove_dir_all(&dir).ok();
         Ok(())
