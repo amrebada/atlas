@@ -177,9 +177,15 @@
 }
 .tt-prose .ProseMirror p { margin: 0; }
 .tt-prose .ProseMirror ul,
-.tt-prose .ProseMirror ol { padding-left: 1.3em; margin: 0.2em 0; }
+.tt-prose .ProseMirror ol { padding-left: 1.5em; margin: 0.2em 0; }
+.tt-prose .ProseMirror ul { list-style-type: disc; }
+.tt-prose .ProseMirror ul ul { list-style-type: circle; }
+.tt-prose .ProseMirror ul ul ul { list-style-type: square; }
+.tt-prose .ProseMirror ol { list-style-type: decimal; }
 .tt-prose .ProseMirror ul li,
 .tt-prose .ProseMirror ol li { margin: 0.2em 0; }
+.tt-prose .ProseMirror ul li::marker,
+.tt-prose .ProseMirror ol li::marker { color: var(--text-dim); }
 .tt-prose .ProseMirror blockquote {
   border-left: 3px solid var(--accent);
   padding-left: 14px;

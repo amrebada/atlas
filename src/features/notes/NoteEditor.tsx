@@ -168,6 +168,8 @@ function NoteEditorInner({
   const [title, setTitle] = useState(initialNote.title);
   const [pinned, setPinned] = useState(initialNote.pinned);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
   const [slash, setSlash] = useState<SlashState | null>(null);
@@ -178,6 +180,9 @@ function NoteEditorInner({
   const noteRef = useRef<Note>(initialNote);
   const slashRef = useRef<SlashState | null>(null);
   slashRef.current = slash;
+  // Debounce handle for auto-save. Each edit resets the timer; a save fires
+  // 800ms after the user stops typing.
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Tiptap editor setup. `StarterKit` includes paragraph, headings, bold,
   const editor = useEditor({
@@ -219,6 +224,8 @@ function NoteEditorInner({
       const text = editor.getText();
       setCharCount(text.length);
       setWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
+      setIsDirty(true);
+      scheduleAutoSave();
       detectSlash(editor);
     },
     onSelectionUpdate: ({ editor }) => {
@@ -341,26 +348,56 @@ function NoteEditorInner({
   const doSave = useCallback(async () => {
     if (!editor) return;
     const body = editor.getHTML();
-    const now = new Date().toISOString();
     const next: Note = {
       ...noteRef.current,
       title: title.trim() || "Untitled note",
       body,
       pinned,
-      updatedAt: now,
+      updatedAt: new Date().toISOString(),
     };
+    setIsSaving(true);
     try {
       await upsertNote(project.id, next);
       noteRef.current = next;
       setSavedAt(new Date());
+      setIsDirty(false);
       onSaved(next);
     } catch (err) {
       pushToast(
         "error",
         `Couldn't save: ${err instanceof Error ? err.message : String(err)}`,
       );
+    } finally {
+      setIsSaving(false);
     }
   }, [editor, title, pinned, project.id, onSaved, pushToast]);
+
+  // Stable wrapper around the latest doSave so the debounced timer always
+  // fires the most recent closure (title/body/pinned change between edits).
+  const doSaveRef = useRef(doSave);
+  useEffect(() => {
+    doSaveRef.current = doSave;
+  }, [doSave]);
+
+  const scheduleAutoSave = useCallback(() => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void doSaveRef.current();
+    }, 800);
+  }, []);
+
+  // Flush pending auto-save before unmount (e.g. closing the overlay) so
+  // the user never loses in-flight edits.
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+        void doSaveRef.current();
+      }
+    };
+  }, []);
 
   const doDelete = useCallback(async () => {
     if (!window.confirm("Delete this note?")) return;
@@ -464,11 +501,15 @@ function NoteEditorInner({
           data-tauri-drag-region
           className="font-mono text-[10px] text-text-dim"
         >
-          {savedAt
-            ? `saved ${fmtTime(savedAt)}`
-            : noteRef.current.body
-              ? "editing"
-              : "new note"}
+          {isSaving
+            ? "saving…"
+            : isDirty
+              ? "unsaved changes"
+              : savedAt
+                ? `saved ${fmtTime(savedAt)}`
+                : noteRef.current.body
+                  ? "editing"
+                  : "new note"}
         </span>
         <IconButton
           title={pinned ? "Unpin" : "Pin"}
@@ -833,7 +874,11 @@ function NoteEditorInner({
         >
           <input
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setIsDirty(true);
+              scheduleAutoSave();
+            }}
             onKeyDown={(e) => onTitleKeyDown(e, editor)}
             placeholder="Untitled note"
             className="w-full py-[4px] mb-[12px] bg-transparent border-0 outline-none text-text"
