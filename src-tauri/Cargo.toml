@@ -1,6 +1,6 @@
 [package]
 name = "atlas"
-version = "1.0.2"
+version = "1.0.3"
 description = "Desktop-native command hub for local git projects"
 authors = ["Amr Ebada"]
 license = "MIT"

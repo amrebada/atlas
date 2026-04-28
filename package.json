@@ -1,7 +1,7 @@
 {
   "name": "atlas",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Desktop-native command hub for local git projects.",
   "author": "Amr Ebada",
   "license": "MIT",
