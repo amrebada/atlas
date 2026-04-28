@@ -217,6 +217,7 @@ function GeneralSection({ settings }: { settings?: Settings }) {
   const pushToast = useUiStore((s) => s.pushToast);
   // The theme is driven from two places: the persisted backend setting
   const setTheme = useUiStore((s) => s.setTheme);
+  const setTerminalTheme = useUiStore((s) => s.setTerminalTheme);
   const general = settings?.general;
 
   const mutation = useMutation({
@@ -225,6 +226,7 @@ function GeneralSection({ settings }: { settings?: Settings }) {
     onSuccess: (_data, patch) => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
       if (patch.theme) setTheme(patch.theme);
+      if (patch.terminalTheme) setTerminalTheme(patch.terminalTheme);
     },
     onError: (err) => pushToast("error", `Save failed: ${String(err)}`),
   });
@@ -261,6 +263,25 @@ function GeneralSection({ settings }: { settings?: Settings }) {
           onChange={(e) =>
             mutation.mutate({
               theme: e.target.value as Settings["general"]["theme"],
+            })
+          }
+          style={SELECT_STYLE}
+        >
+          <option value="dark">dark</option>
+          <option value="light">light</option>
+          <option value="system">match system</option>
+        </select>
+      </SettingsRow>
+      <SettingsRow
+        label="Terminal theme"
+        hint="Independent from the app theme — pick a different look for shells."
+      >
+        <select
+          value={general?.terminalTheme ?? "system"}
+          onChange={(e) =>
+            mutation.mutate({
+              terminalTheme: e.target
+                .value as Settings["general"]["terminalTheme"],
             })
           }
           style={SELECT_STYLE}
