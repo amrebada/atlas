@@ -54,6 +54,22 @@
   --kbd-bg: oklch(0.96 0.003 85);
 }
 
+[data-term-theme="dark"] {
+  --term-bg: oklch(0.16 0.004 260);
+  --term-fg: oklch(0.96 0.003 260);
+  --term-cursor: oklch(0.82 0.17 145);
+  --term-cursor-fg: oklch(0.16 0.004 260);
+  --term-selection-bg: oklch(0.82 0.17 145 / 0.25);
+}
+
+[data-term-theme="light"] {
+  --term-bg: oklch(0.985 0.003 85);
+  --term-fg: oklch(0.22 0.004 260);
+  --term-cursor: oklch(0.62 0.17 145);
+  --term-cursor-fg: oklch(0.99 0 0);
+  --term-selection-bg: oklch(0.62 0.17 145 / 0.25);
+}
+
 [data-font="plex"] {
   --sans: "IBM Plex Sans", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;

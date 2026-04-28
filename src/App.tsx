@@ -46,6 +46,7 @@ export default function App() {
 
 function AppInner() {
   const theme = useUiStore((s) => s.theme);
+  const terminalTheme = useUiStore((s) => s.terminalTheme);
   const density = useUiStore((s) => s.density);
   const font = useUiStore((s) => s.font);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
@@ -71,6 +72,7 @@ function AppInner() {
 
   // Hydrate the Zustand UI store from persisted settings. The store is
   const setTheme = useUiStore((s) => s.setTheme);
+  const setTerminalTheme = useUiStore((s) => s.setTerminalTheme);
   const { data: persistedSettings } = useQuery<Settings>({
     queryKey: ["settings"],
     queryFn: getSettings,
@@ -80,27 +82,36 @@ function AppInner() {
     if (persistedSettings?.general.theme) {
       setTheme(persistedSettings.general.theme);
     }
-  }, [persistedSettings?.general.theme, setTheme]);
+    if (persistedSettings?.general.terminalTheme) {
+      setTerminalTheme(persistedSettings.general.terminalTheme);
+    }
+  }, [
+    persistedSettings?.general.theme,
+    persistedSettings?.general.terminalTheme,
+    setTheme,
+    setTerminalTheme,
+  ]);
 
   // Apply data attributes + sidebar width CSS var on <html>. Runs on every
   useEffect(() => {
     const root = document.documentElement;
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const resolve = (t: typeof theme) =>
+      t === "system" ? (mql.matches ? "dark" : "light") : t;
     const apply = () => {
-      const effective =
-        theme === "system" ? (mql.matches ? "dark" : "light") : theme;
-      root.dataset.theme = effective;
+      root.dataset.theme = resolve(theme);
+      root.dataset.termTheme = resolve(terminalTheme);
     };
     apply();
     root.dataset.density = density;
     root.dataset.font = font;
     root.style.setProperty("--sidebar-w", `${sidebarWidth}px`);
-    if (theme === "system") {
+    if (theme === "system" || terminalTheme === "system") {
       mql.addEventListener("change", apply);
       return () => mql.removeEventListener("change", apply);
     }
     return undefined;
-  }, [theme, density, font, sidebarWidth]);
+  }, [theme, terminalTheme, density, font, sidebarWidth]);
 
   // TanStack Query fetches the real project list via the Rust `list` command.
   const { data: projects = [] } = useQuery<Project[]>({

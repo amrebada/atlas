@@ -104,7 +104,7 @@ pub enum ScriptGroup {
     Util,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "lowercase")]
 #[ts(
     export,
@@ -114,6 +114,7 @@ pub enum ScriptGroup {
 pub enum Theme {
     Dark,
     Light,
+    #[default]
     System,
 }
 
@@ -394,6 +395,8 @@ pub struct GeneralSettings {
     pub menu_bar_agent: bool,
     pub default_project_location: String,
     pub theme: Theme,
+    #[serde(default)]
+    pub terminal_theme: Theme,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

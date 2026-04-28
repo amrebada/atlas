@@ -24,8 +24,9 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
     let dataUnlisten: UnlistenFn | null = null;
     let exitUnlisten: UnlistenFn | null = null;
     let resizeObs: ResizeObserver | null = null;
+    let themeObs: MutationObserver | null = null;
     let opened = false; // term.open() has been called AND container had non-zero dims
-    const pendingChunks: string[] = []; // buffered PTY output until we're opened
+    const pendingChunks: (string | Uint8Array)[] = []; // buffered PTY output until we're opened
 
     (async () => {
       // Lazy-import so the first-paint bundle stays small.
@@ -45,7 +46,6 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
         lineHeight: 1.25,
         cursorBlink: true,
         allowProposedApi: true,
-        convertEol: true,
         scrollback: 5000,
         theme: readTheme(),
       });
@@ -77,12 +77,27 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
       };
 
       // Stream output. Buffer chunks while the terminal isn't opened yet so
-      const dataPromise = listen<{ chunk: string } | string>(
+      // serde-json serializes Rust `&[u8]` as an array of numbers; xterm
+      // needs string | Uint8Array, so normalise here.
+      type RawChunk = string | number[] | Uint8Array;
+      type DataPayload = string | { chunk: RawChunk };
+      const dataPromise = listen<DataPayload>(
         `terminal:data:${pane.id}`,
         (e) => {
-          const chunk =
-            typeof e.payload === "string" ? e.payload : e.payload?.chunk ?? "";
-          if (!chunk) return;
+          const raw: RawChunk | undefined =
+            typeof e.payload === "string" ? e.payload : e.payload?.chunk;
+          if (raw == null) return;
+          let chunk: string | Uint8Array;
+          if (typeof raw === "string") {
+            chunk = raw;
+          } else if (raw instanceof Uint8Array) {
+            chunk = raw;
+          } else if (Array.isArray(raw)) {
+            chunk = new Uint8Array(raw);
+          } else {
+            return;
+          }
+          if (chunk.length === 0) return;
           if (opened && term) {
             term.write(chunk);
           } else {
@@ -141,6 +156,14 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
       });
       resizeObs.observe(hostRef.current);
 
+      themeObs = new MutationObserver(() => {
+        if (term) term.options.theme = readTheme();
+      });
+      themeObs.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-term-theme"],
+      });
+
       // Defer the initial open() to rAF so StrictMode's dev-mode
       requestAnimationFrame(() => {
         if (disposed) return;
@@ -151,6 +174,7 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
     return () => {
       disposed = true;
       if (resizeObs) resizeObs.disconnect();
+      if (themeObs) themeObs.disconnect();
       if (dataUnlisten) dataUnlisten();
       if (exitUnlisten) exitUnlisten();
       // xterm.js stores a WebGL/canvas context - disposing is mandatory.
@@ -167,7 +191,7 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
       onClick={onFocus}
       className="flex flex-col h-full w-full min-h-0 min-w-0"
       style={{
-        background: "var(--bg)",
+        background: "var(--term-bg)",
         outline: focused ? "1px solid var(--accent)" : "none",
         outlineOffset: -1,
       }}
@@ -201,11 +225,14 @@ function readTheme(): import("xterm").ITheme {
     }
   };
   return {
-    background: resolve("--bg", "#111111"),
-    foreground: resolve("--text", "#eeeeee"),
-    cursor: resolve("--accent", "#7c7fee"),
-    cursorAccent: resolve("--accent-fg", "#111111"),
-    selectionBackground: "rgba(124, 127, 238, 0.25)",
+    background: resolve("--term-bg", "#111111"),
+    foreground: resolve("--term-fg", "#eeeeee"),
+    cursor: resolve("--term-cursor", "#7c7fee"),
+    cursorAccent: resolve("--term-cursor-fg", "#111111"),
+    selectionBackground: resolve(
+      "--term-selection-bg",
+      "rgba(124, 127, 238, 0.25)",
+    ),
     selectionForeground: undefined,
   };
 }

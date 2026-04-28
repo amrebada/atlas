@@ -63,6 +63,7 @@ pub fn default_settings() -> Settings {
             menu_bar_agent: true,
             default_project_location: default_project_location(),
             theme: Theme::System,
+            terminal_theme: Theme::System,
         },
         editors: EditorsSettings {
             detected: Vec::new(),
@@ -248,6 +249,41 @@ mod tests {
 
         // Built-ins present.
         assert!(s.templates.iter().any(|t| t.builtin && t.id == "node-ts"));
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn default_terminal_theme_is_system() -> anyhow::Result<()> {
+        let dir = unique_dir("terminal-theme-default");
+        std::fs::create_dir_all(&dir)?;
+
+        let s = load(&dir).await?;
+        assert!(matches!(s.general.terminal_theme, Theme::System));
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn legacy_json_without_terminal_theme_defaults_to_system() -> anyhow::Result<()> {
+        let dir = unique_dir("terminal-theme-legacy");
+        std::fs::create_dir_all(&dir)?;
+
+        // Write a settings.json missing the `terminalTheme` key. We reuse the
+        // current default settings shape and remove the field so older files are
+        // simulated faithfully.
+        let mut value = serde_json::to_value(default_settings())?;
+        value
+            .get_mut("general")
+            .and_then(|g| g.as_object_mut())
+            .expect("general object")
+            .remove("terminalTheme");
+        write_json(&settings_path(&dir), &value)?;
+
+        let s = load(&dir).await?;
+        assert!(matches!(s.general.terminal_theme, Theme::System));
 
         std::fs::remove_dir_all(&dir).ok();
         Ok(())

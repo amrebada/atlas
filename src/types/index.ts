@@ -256,6 +256,7 @@ export interface GeneralSettings {
   menuBarAgent: boolean;
   defaultProjectLocation: string;
   theme: Theme;
+  terminalTheme: Theme;
 }
 
 export interface EditorsSettings {
