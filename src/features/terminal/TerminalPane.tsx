@@ -177,7 +177,7 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
       onClick={onFocus}
       className="flex flex-col h-full w-full min-h-0 min-w-0"
       style={{
-        background: "var(--bg)",
+        background: "var(--term-bg)",
         outline: focused ? "1px solid var(--accent)" : "none",
         outlineOffset: -1,
       }}
