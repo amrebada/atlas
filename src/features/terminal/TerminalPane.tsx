@@ -26,7 +26,7 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
     let resizeObs: ResizeObserver | null = null;
     let themeObs: MutationObserver | null = null;
     let opened = false; // term.open() has been called AND container had non-zero dims
-    const pendingChunks: string[] = []; // buffered PTY output until we're opened
+    const pendingChunks: (string | Uint8Array)[] = []; // buffered PTY output until we're opened
 
     (async () => {
       // Lazy-import so the first-paint bundle stays small.
@@ -46,7 +46,6 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
         lineHeight: 1.25,
         cursorBlink: true,
         allowProposedApi: true,
-        convertEol: true,
         scrollback: 5000,
         theme: readTheme(),
       });
@@ -78,12 +77,27 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
       };
 
       // Stream output. Buffer chunks while the terminal isn't opened yet so
-      const dataPromise = listen<{ chunk: string } | string>(
+      // serde-json serializes Rust `&[u8]` as an array of numbers; xterm
+      // needs string | Uint8Array, so normalise here.
+      type RawChunk = string | number[] | Uint8Array;
+      type DataPayload = string | { chunk: RawChunk };
+      const dataPromise = listen<DataPayload>(
         `terminal:data:${pane.id}`,
         (e) => {
-          const chunk =
-            typeof e.payload === "string" ? e.payload : e.payload?.chunk ?? "";
-          if (!chunk) return;
+          const raw: RawChunk | undefined =
+            typeof e.payload === "string" ? e.payload : e.payload?.chunk;
+          if (raw == null) return;
+          let chunk: string | Uint8Array;
+          if (typeof raw === "string") {
+            chunk = raw;
+          } else if (raw instanceof Uint8Array) {
+            chunk = raw;
+          } else if (Array.isArray(raw)) {
+            chunk = new Uint8Array(raw);
+          } else {
+            return;
+          }
+          if (chunk.length === 0) return;
           if (opened && term) {
             term.write(chunk);
           } else {
