@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/amrebada/atlas)](https://github.com/amrebada/atlas/releases)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
-
+<a href="https://www.producthunt.com/products/atlas-30?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-atlas-31" target="_blank" rel="noopener noreferrer"><img alt="Atlas - One command hub for every git repo on your machine | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1133476&amp;theme=light&amp;t=1777296634475"></a>
 <img src="./assets/screenshot.png" alt="Atlas screenshot" width="800" />
 
 </div>
