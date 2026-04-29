@@ -1,5 +1,22 @@
 import { useCallback, useEffect } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  rectSortingStrategy,
+  useSortable,
+  verticalListSortingStrategy,
+  type SortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useUiStore } from "../../state/store";
 import {
   paneLayoutSave,
@@ -48,7 +65,23 @@ export function TerminalStrip({
   const setMaxed = useTerminalStore((s) => s.setMaxed);
   const setCollapsed = useTerminalStore((s) => s.setCollapsed);
   const setActive = useTerminalStore((s) => s.setActive);
+  const movePane = useTerminalStore((s) => s.movePane);
   const pushToast = useUiStore((s) => s.pushToast);
+
+  // 8 px activation distance keeps plain clicks (focus tab, close, rerun)
+  // from being swallowed as drag starts.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+
+  const handleDragEnd = useCallback(
+    (e: DragEndEvent) => {
+      const { active, over } = e;
+      if (!over || active.id === over.id) return;
+      movePane(String(active.id), String(over.id));
+    },
+    [movePane],
+  );
 
   // Global fan-out of terminal events → status patches. Mounted here (once,
   useTerminalEvents();
@@ -193,19 +226,32 @@ export function TerminalStrip({
             minWidth: 0,
           }}
         >
-          {panes.map((p) => (
-            <TabChip
-              key={p.id}
-              pane={p}
-              active={p.id === activePaneId}
-              canClose={panes.length > 1 || maxed}
-              onClick={() => setActive(p.id)}
-              onClose={() => closePane(p.id)}
-              onRerun={
-                p.kind === "claude-session" ? undefined : () => rerunPane(p)
-              }
-            />
-          ))}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={panes.map((p) => p.id)}
+              strategy={horizontalListSortingStrategy}
+            >
+              {panes.map((p) => (
+                <TabChip
+                  key={p.id}
+                  pane={p}
+                  active={p.id === activePaneId}
+                  canClose={panes.length > 1 || maxed}
+                  onClick={() => setActive(p.id)}
+                  onClose={() => closePane(p.id)}
+                  onRerun={
+                    p.kind === "claude-session"
+                      ? undefined
+                      : () => rerunPane(p)
+                  }
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
           <button
             onClick={openShell}
             title="New shell"
@@ -315,6 +361,8 @@ export function TerminalStrip({
           onFocus={setActive}
           onClose={closePane}
           onRerun={rerunPane}
+          sensors={sensors}
+          onDragEnd={handleDragEnd}
         />
       </div>
     </div>
@@ -330,6 +378,8 @@ interface PaneAreaProps {
   onFocus: (id: string) => void;
   onClose: (id: string) => void;
   onRerun: (pane: Pane) => void;
+  sensors: ReturnType<typeof useSensors>;
+  onDragEnd: (e: DragEndEvent) => void;
 }
 
 function PaneArea({
@@ -339,6 +389,8 @@ function PaneArea({
   onFocus,
   onClose,
   onRerun,
+  sensors,
+  onDragEnd,
 }: PaneAreaProps) {
   if (panes.length === 0) return null;
   const active = panes.find((p) => p.id === activePaneId) ?? panes[0];
@@ -367,53 +419,122 @@ function PaneArea({
             }
           : gridContainerStyle(panes.length);
 
-  return (
-    <div style={containerStyle}>
-      {panes.map((p) => {
-        const isActive = p.id === active.id;
-        const wrapperStyle: CSSProperties =
-          layout === "tabs"
-            ? {
+  // Tabs layout shows a single pane with the others kept mounted at
+  // `display:none`. There is no visible spatial relationship to drag, so
+  // this layout opts out of pane-area DnD - reordering is still available
+  // via the tab strip above.
+  if (layout === "tabs") {
+    return (
+      <div style={containerStyle}>
+        {panes.map((p) => {
+          const isActive = p.id === active.id;
+          return (
+            <div
+              key={p.id}
+              style={{
                 position: "absolute",
                 inset: 0,
                 display: isActive ? "flex" : "none",
-              }
-            : {
-                display: "flex",
-                minWidth: 0,
-                minHeight: 0,
-              };
-        return (
-          <div
-            key={p.id}
-            style={{
-              ...wrapperStyle,
-              flexDirection: "column",
-              background: "var(--bg)",
-            }}
-          >
-            {/* Per-pane header with project label + kill + rerun. Hidden
-                in tabs layout — the top tab-strip already shows title/close
-                for the single active pane, so adding a duplicate header
-                wastes vertical space. */}
-            {layout !== "tabs" && (
-              <PaneHeader
-                pane={p}
-                active={isActive}
-                onClose={() => onClose(p.id)}
-                onRerun={() => onRerun(p)}
-              />
-            )}
-            <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-              <TerminalPane
-                pane={p}
-                focused={isActive}
-                onFocus={layout === "tabs" ? undefined : () => onFocus(p.id)}
-              />
+                flexDirection: "column",
+                background: "var(--bg)",
+              }}
+            >
+              <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+                <TerminalPane pane={p} focused={isActive} />
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+    );
+  }
+
+  const strategy: SortingStrategy =
+    layout === "split-v"
+      ? horizontalListSortingStrategy
+      : layout === "split-h"
+        ? verticalListSortingStrategy
+        : rectSortingStrategy;
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={onDragEnd}
+    >
+      <SortableContext items={panes.map((p) => p.id)} strategy={strategy}>
+        <div style={containerStyle}>
+          {panes.map((p) => (
+            <SortablePaneCell
+              key={p.id}
+              pane={p}
+              active={p.id === active.id}
+              onClose={() => onClose(p.id)}
+              onRerun={() => onRerun(p)}
+              onFocus={() => onFocus(p.id)}
+            />
+          ))}
+        </div>
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+// One draggable pane in a split / grid layout. The pane header acts as
+// the drag handle so users keep full pointer access to the terminal body
+// (xterm.js needs unimpeded clicks for selection / focus).
+function SortablePaneCell({
+  pane,
+  active,
+  onClose,
+  onRerun,
+  onFocus,
+}: {
+  pane: Pane;
+  active: boolean;
+  onClose: () => void;
+  onRerun: () => void;
+  onFocus: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: pane.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        minWidth: 0,
+        minHeight: 0,
+        background: "var(--bg)",
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+        zIndex: isDragging ? 10 : undefined,
+      }}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        style={{ touchAction: "none", cursor: "grab" }}
+      >
+        <PaneHeader
+          pane={pane}
+          active={active}
+          onClose={onClose}
+          onRerun={onRerun}
+        />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+        <TerminalPane pane={pane} focused={active} onFocus={onFocus} />
+      </div>
     </div>
   );
 }
@@ -451,8 +572,19 @@ function TabChip({
   onRerun?: () => void;
 }) {
   const dot = statusDot(pane);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: pane.id });
   return (
     <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
       onClick={onClick}
       style={{
         display: "inline-flex",
@@ -460,7 +592,7 @@ function TabChip({
         gap: 6,
         padding: "0 6px 0 10px",
         height: 30,
-        cursor: "pointer",
+        cursor: isDragging ? "grabbing" : "pointer",
         borderRight: "1px solid var(--line)",
         background: active ? "var(--surface)" : "transparent",
         color: active ? "var(--text)" : "var(--text-dim)",
@@ -470,6 +602,11 @@ function TabChip({
         minWidth: 0,
         borderTop: "2px solid " + (active ? "var(--accent)" : "transparent"),
         marginTop: -1,
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+        zIndex: isDragging ? 10 : undefined,
+        touchAction: "none",
       }}
     >
       <span

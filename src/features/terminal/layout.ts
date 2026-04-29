@@ -25,6 +25,8 @@ interface TerminalState {
   patchPaneStatus: (id: PaneId, status: PaneStatus) => void;
   // Swap a pane's id (e.g. after a rerun spawned a fresh PTY). Keeps
   replacePaneId: (oldId: PaneId, newId: PaneId, patch?: Partial<Pane>) => void;
+  // Reorder panes by moving the pane with `fromId` to the slot of `toId`.
+  movePane: (fromId: PaneId, toId: PaneId) => void;
   // Replace the whole pane set - used when restoring a saved layout on
   restore: (
     next: { panes: Pane[]; layout: LayoutMode; activePaneId: PaneId | null },
@@ -104,6 +106,17 @@ export const useTerminalStore = create<TerminalState>((set) => ({
       ),
       activePaneId: s.activePaneId === oldId ? newId : s.activePaneId,
     })),
+
+  movePane: (fromId, toId) =>
+    set((s) => {
+      const fromIdx = s.panes.findIndex((p) => p.id === fromId);
+      const toIdx = s.panes.findIndex((p) => p.id === toId);
+      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return {};
+      const next = s.panes.slice();
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return { panes: next };
+    }),
 
   restore: (next) =>
     set({
