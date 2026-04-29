@@ -874,12 +874,13 @@ export async function spawnScriptPane(args: {
   branch?: string | null;
 }): Promise<string | null> {
   try {
-    const command = "sh";
-    const cmdArgs = ["-lc", args.cmd];
+    // Omit `command` so the backend uses the user's `$SHELL` and prepends
+    // `-i -l`. Aliases and version-manager init from `.zshrc`/`.zprofile`
+    // are then available inside the script.
+    const cmdArgs = ["-c", args.cmd];
     const id = await terminalOpen({
       kind: "script",
       cwd: args.cwd,
-      command,
       args: cmdArgs,
     });
     useTerminalStore.getState().addPane({
@@ -892,7 +893,6 @@ export async function spawnScriptPane(args: {
       branch: args.branch ?? undefined,
       projectId: args.projectId,
       projectLabel: args.projectLabel,
-      command,
       args: cmdArgs,
     });
     return id;

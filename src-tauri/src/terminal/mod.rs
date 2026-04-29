@@ -287,16 +287,36 @@ impl TerminalManager {
     }
 
     /// Resolve `(program, args)` from an `OpenRequest`. When `command` is
+    /// not provided, the user's login shell is launched with `-i -l` so
+    /// `.zshrc` / `.zprofile` (aliases, nvm/fnm/asdf init) are sourced -
+    /// matching Terminal.app behaviour.
     fn resolve_program(req: &OpenRequest) -> (String, Vec<String>) {
-        let program = req.command.clone().unwrap_or_else(Self::default_shell);
-        (program, req.args.clone())
+        if let Some(cmd) = &req.command {
+            return (cmd.clone(), req.args.clone());
+        }
+        let shell = Self::default_shell();
+        #[cfg(unix)]
+        let mut args = vec!["-i".to_string(), "-l".to_string()];
+        #[cfg(not(unix))]
+        let mut args: Vec<String> = Vec::new();
+        args.extend(req.args.iter().cloned());
+        (shell, args)
     }
 
     /// Platform-default shell. Callers can override via `OpenRequest.command`.
+    /// Honors `$SHELL` (the user's `chsh` choice) so panes use bash / fish /
+    /// zsh / etc. as configured. On macOS Tauri inherits `$SHELL` from the
+    /// login shell during `path_bootstrap`.
     pub fn default_shell() -> String {
         if cfg!(target_os = "windows") {
-            "cmd.exe".into()
-        } else if cfg!(target_os = "macos") {
+            return "cmd.exe".into();
+        }
+        if let Ok(s) = std::env::var("SHELL") {
+            if !s.is_empty() {
+                return s;
+            }
+        }
+        if cfg!(target_os = "macos") {
             "/bin/zsh".into()
         } else {
             "/bin/sh".into()

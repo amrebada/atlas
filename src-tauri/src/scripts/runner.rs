@@ -30,14 +30,27 @@ pub async fn run(
         "spawning script pane"
     );
 
-    // `sh -c "<cmd>"` preserves the pipelines / redirects the user
+    // Run the script under the user's login shell with `-ilc` so aliases,
+    // version-manager init (nvm / fnm / asdf), and other `.zshrc` /
+    // `.zprofile` setup are available - same env the user would get
+    // typing the command in Terminal.app.
     let shell = TerminalManager::default_shell();
+
+    #[cfg(unix)]
+    let args = vec![
+        "-i".to_string(),
+        "-l".to_string(),
+        "-c".to_string(),
+        script.cmd.clone(),
+    ];
+    #[cfg(not(unix))]
+    let args = vec!["-c".to_string(), script.cmd.clone()];
 
     let req = OpenRequest {
         kind: PaneKind::Script,
         cwd: cwd.to_path_buf(),
         command: Some(shell),
-        args: vec!["-c".to_string(), script.cmd.clone()],
+        args,
         env,
         title: Some(script.name.clone()),
         branch: None,
