@@ -11,19 +11,27 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.platform }}
+    name: Build ${{ matrix.platform }} ${{ matrix.args }}
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Apple Silicon — runs on macos-latest (M-series runner).
           - platform: macos-latest
-            args: "--target universal-apple-darwin"
+            args: "--target aarch64-apple-darwin"
+            rust-target: aarch64-apple-darwin
+          # Intel macs — pinned to macos-13 (last Intel runner).
+          - platform: macos-13
+            args: "--target x86_64-apple-darwin"
+            rust-target: x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ""
+            rust-target: ""
           - platform: windows-latest
             args: ""
+            rust-target: ""
 
     runs-on: ${{ matrix.platform }}
 
@@ -42,12 +50,15 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust-target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          # Per-arch macOS builds need separate caches so they don't
+          # clobber each other on shared runners.
+          key: ${{ matrix.platform }}-${{ matrix.rust-target }}
 
       - name: Install Linux build dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -76,9 +87,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-          # macOS Developer ID + notarisation. Optional — without these
-          # macOS users get "unidentified developer" warnings on every
-          # auto-update, but the update still applies.
+          # macOS Developer ID + notarisation.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -87,17 +96,24 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
           # No Windows code signing — Authenticode is intentionally not
-          # configured. Windows users will see SmartScreen / "unknown
-          # publisher" warnings on install. Auto-update still works
-          # via the Tauri signature alone.
+          # configured. Auto-update still works; SmartScreen warns once
+          # per install.
 
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Atlas ${{ github.ref_name }}"
           releaseBody: "See CHANGELOG.md for release notes."
           # Publish immediately so `releases/latest/download/latest.json`
-          # resolves without manual intervention. Drafts don't satisfy
-          # `/releases/latest`.
+          # resolves without manual intervention.
           releaseDraft: false
           prerelease: false
+          # Make tauri-action upload the `.nsis.zip` updater bundle
+          # alongside the `.msi` on Windows. Without this it only
+          # uploads the `.msi` and the Windows entry is missing from
+          # `latest.json`.
+          updaterJsonPreferNsis: true
+          # Keep the per-arch entries on macOS so the manifest emits
+          # `darwin-aarch64` + `darwin-x86_64` keys (matching what
+          # `plugin-updater` looks up at runtime).
+          updaterJsonKeepUniversal: false
           args: ${{ matrix.args }}
