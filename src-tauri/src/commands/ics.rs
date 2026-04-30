@@ -79,7 +79,10 @@ pub async fn ics_export_all(
             }
             events.push(build_milestone_event(m, &p.name));
         }
-        for r in routines.iter().filter(|r| r.project_id.as_deref() == Some(p.id.as_str())) {
+        for r in routines
+            .iter()
+            .filter(|r| r.project_id.as_deref() == Some(p.id.as_str()))
+        {
             if r.title.trim().is_empty() || r.paused {
                 continue;
             }
@@ -116,11 +119,7 @@ pub async fn ics_export_all(
 
     // ----- combined -----
     let combined_cal = build_calendar("Atlas — All", &combined);
-    write_atomic(
-        &dir.join("today.ics"),
-        combined_cal.as_bytes(),
-    )
-    .map_err(|e| e.to_string())?;
+    write_atomic(&dir.join("today.ics"), combined_cal.as_bytes()).map_err(|e| e.to_string())?;
 
     Ok(dir.to_string_lossy().to_string())
 }

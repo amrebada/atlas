@@ -90,7 +90,8 @@ pub fn task_points(todo: &Todo, now: DateTime<Utc>) -> TaskPoints {
         match deadline {
             Some(d) if done_at > d => {
                 let days_late = days_between(d, done_at);
-                let success = base * (1.0 - LATE_PENALTY_PER_DAY * days_late).max(LATE_SUCCESS_FLOOR);
+                let success =
+                    base * (1.0 - LATE_PENALTY_PER_DAY * days_late).max(LATE_SUCCESS_FLOOR);
                 let fail = days_late * FAIL_POINTS_PER_DAY_LATE * weight;
                 TaskPoints { success, fail }
             }
@@ -103,10 +104,7 @@ pub fn task_points(todo: &Todo, now: DateTime<Utc>) -> TaskPoints {
         if now > d {
             let days_late = days_between(d, now);
             let fail = days_late * FAIL_POINTS_PER_DAY_LATE * weight;
-            TaskPoints {
-                success: 0.0,
-                fail,
-            }
+            TaskPoints { success: 0.0, fail }
         } else {
             TaskPoints::default()
         }
@@ -225,7 +223,10 @@ mod tests {
     #[test]
     fn open_no_deadline_is_zero() {
         let now = at(2026, 5, 1, 12);
-        assert_eq!(task_points(&mk_todo(Priority::P2, None), now), TaskPoints::default());
+        assert_eq!(
+            task_points(&mk_todo(Priority::P2, None), now),
+            TaskPoints::default()
+        );
     }
 
     #[test]

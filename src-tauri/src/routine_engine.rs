@@ -79,15 +79,17 @@ pub fn parse_rrule(input: &str) -> anyhow::Result<ParsedRRule> {
         if part.is_empty() {
             continue;
         }
-        let (k, v) = part.split_once('=').ok_or_else(|| {
-            anyhow::anyhow!("malformed RRULE part {part:?} (expected KEY=VALUE)")
-        })?;
+        let (k, v) = part
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("malformed RRULE part {part:?} (expected KEY=VALUE)"))?;
         match k.trim().to_uppercase().as_str() {
-            "FREQ" => freq = Some(match v.trim() {
-                "DAILY" => "DAILY",
-                "WEEKLY" => "WEEKLY",
-                other => anyhow::bail!("unsupported FREQ {other:?} (Daily | Weekly only)"),
-            }),
+            "FREQ" => {
+                freq = Some(match v.trim() {
+                    "DAILY" => "DAILY",
+                    "WEEKLY" => "WEEKLY",
+                    other => anyhow::bail!("unsupported FREQ {other:?} (Daily | Weekly only)"),
+                })
+            }
             "INTERVAL" => {
                 interval = v.trim().parse().map_err(|_| {
                     anyhow::anyhow!("INTERVAL must be a positive integer, got {v:?}")
@@ -485,8 +487,7 @@ pub fn routine_score(routine: &Routine, instances: &[RoutineInstance]) -> Routin
             } else {
                 0.0
             };
-            let success =
-                base * (1.0 - LATE_PENALTY_PER_DAY * days_late).max(LATE_SUCCESS_FLOOR);
+            let success = base * (1.0 - LATE_PENALTY_PER_DAY * days_late).max(LATE_SUCCESS_FLOOR);
             s += success;
             completed += 1;
         }
@@ -590,7 +591,9 @@ mod tests {
     fn parses_weekly_byday() {
         let p = parse_rrule("FREQ=WEEKLY;BYDAY=MO,WE,FR").unwrap();
         match p.cadence {
-            Cadence::Weekdays { days } => assert_eq!(days, vec![Weekday::Mon, Weekday::Wed, Weekday::Fri]),
+            Cadence::Weekdays { days } => {
+                assert_eq!(days, vec![Weekday::Mon, Weekday::Wed, Weekday::Fri])
+            }
             other => panic!("expected weekdays, got {other:?}"),
         }
     }
@@ -672,10 +675,14 @@ mod tests {
 
     #[test]
     fn materialize_is_idempotent() {
-        let r = mk_routine("FREQ=DAILY;COUNT=5", "2026-05-01", Goal::Count {
-            target: 5,
-            completed: 0,
-        });
+        let r = mk_routine(
+            "FREQ=DAILY;COUNT=5",
+            "2026-05-01",
+            Goal::Count {
+                target: 5,
+                completed: 0,
+            },
+        );
         let first = materialize_routine(&r, d(2026, 5, 30), &[]).unwrap();
         assert_eq!(first.len(), 5);
         let second = materialize_routine(&r, d(2026, 5, 30), &first).unwrap();
@@ -685,10 +692,14 @@ mod tests {
     #[test]
     fn materialize_stops_at_count_target() {
         // Goal Count(3) caps total instances even if RRULE is unbounded.
-        let r = mk_routine("FREQ=DAILY", "2026-05-01", Goal::Count {
-            target: 3,
-            completed: 0,
-        });
+        let r = mk_routine(
+            "FREQ=DAILY",
+            "2026-05-01",
+            Goal::Count {
+                target: 3,
+                completed: 0,
+            },
+        );
         let first = materialize_routine(&r, d(2026, 5, 30), &[]).unwrap();
         assert_eq!(first.len(), 3);
     }
@@ -705,10 +716,14 @@ mod tests {
 
     #[test]
     fn apply_overdue_marks_24h_late_instances_missed() {
-        let r = mk_routine("FREQ=DAILY", "2026-05-01", Goal::Count {
-            target: 100,
-            completed: 0,
-        });
+        let r = mk_routine(
+            "FREQ=DAILY",
+            "2026-05-01",
+            Goal::Count {
+                target: 100,
+                completed: 0,
+            },
+        );
         let mut insts = vec![RoutineInstance {
             id: "i1".into(),
             routine_id: "r1".into(),
@@ -817,10 +832,14 @@ mod tests {
 
     #[test]
     fn projection_extends_naturally_with_misses() {
-        let r = mk_routine("FREQ=DAILY;INTERVAL=2", "2026-05-01", Goal::Count {
-            target: 100,
-            completed: 0,
-        });
+        let r = mk_routine(
+            "FREQ=DAILY;INTERVAL=2",
+            "2026-05-01",
+            Goal::Count {
+                target: 100,
+                completed: 0,
+            },
+        );
         // 0 done so far, today is May 5.
         let proj = projected_completion(&r, &[], d(2026, 5, 5));
         // 100 remaining * 2 days = 200 days from May 5 → 2026-11-21.

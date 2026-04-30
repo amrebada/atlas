@@ -63,8 +63,10 @@ pub async fn palette_query(
     }
 
     let routines = planner_io::load_routines(&ctx.app_data_dir).unwrap_or_default();
-    let project_lookup: std::collections::HashMap<String, String> =
-        projects.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+    let project_lookup: std::collections::HashMap<String, String> = projects
+        .iter()
+        .map(|p| (p.id.clone(), p.name.clone()))
+        .collect();
     for r in routines {
         if let Some(score) = match_score(&r.title, &q) {
             let project_name = r

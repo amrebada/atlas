@@ -68,8 +68,7 @@ pub async fn timeline_pin_project(
     ctx: tauri::State<'_, AppContext>,
     project_id: ProjectId,
 ) -> Result<TimelineConfig, String> {
-    let mut cfg =
-        planner_io::load_timeline_config(&ctx.app_data_dir).map_err(|e| e.to_string())?;
+    let mut cfg = planner_io::load_timeline_config(&ctx.app_data_dir).map_err(|e| e.to_string())?;
     if !cfg.pinned_project_ids.iter().any(|id| id == &project_id) {
         cfg.pinned_project_ids.push(project_id);
     }
@@ -84,8 +83,7 @@ pub async fn timeline_unpin_project(
     ctx: tauri::State<'_, AppContext>,
     project_id: ProjectId,
 ) -> Result<TimelineConfig, String> {
-    let mut cfg =
-        planner_io::load_timeline_config(&ctx.app_data_dir).map_err(|e| e.to_string())?;
+    let mut cfg = planner_io::load_timeline_config(&ctx.app_data_dir).map_err(|e| e.to_string())?;
     cfg.pinned_project_ids.retain(|id| id != &project_id);
     planner_io::save_timeline_config(&ctx.app_data_dir, &cfg).map_err(|e| e.to_string())?;
     let _ = events::emit_planner(&app, "planner:timeline_changed", "unpinned");
@@ -102,8 +100,7 @@ pub async fn timeline_set_range(
         "week" | "month" => visible_range,
         other => return Err(format!("invalid range {other:?} (expected week | month)")),
     };
-    let mut cfg =
-        planner_io::load_timeline_config(&ctx.app_data_dir).map_err(|e| e.to_string())?;
+    let mut cfg = planner_io::load_timeline_config(&ctx.app_data_dir).map_err(|e| e.to_string())?;
     cfg.visible_range = normalised;
     planner_io::save_timeline_config(&ctx.app_data_dir, &cfg).map_err(|e| e.to_string())?;
     let _ = events::emit_planner(&app, "planner:timeline_changed", "range");
@@ -122,8 +119,7 @@ pub async fn timeline_query(
 ) -> Result<TimelineData, String> {
     refresh_routines(&ctx).await.map_err(|e| e.to_string())?;
 
-    let cfg =
-        planner_io::load_timeline_config(&ctx.app_data_dir).map_err(|e| e.to_string())?;
+    let cfg = planner_io::load_timeline_config(&ctx.app_data_dir).map_err(|e| e.to_string())?;
     let effective_range = range_override.unwrap_or_else(|| cfg.visible_range.clone());
 
     let today = Utc::now().date_naive();
@@ -149,10 +145,8 @@ pub async fn timeline_query(
         })
         .await
         .map_err(|e| e.to_string())?;
-    let project_by_id: std::collections::HashMap<String, _> = projects
-        .into_iter()
-        .map(|p| (p.id.clone(), p))
-        .collect();
+    let project_by_id: std::collections::HashMap<String, _> =
+        projects.into_iter().map(|p| (p.id.clone(), p)).collect();
 
     let routines = planner_io::load_routines(&ctx.app_data_dir).unwrap_or_default();
     let instances = planner_io::load_instances(&ctx.app_data_dir).unwrap_or_default();
@@ -180,10 +174,8 @@ pub async fn timeline_query(
             .filter(|r| r.project_id.as_deref() == Some(pid.as_str()))
             .cloned()
             .collect();
-        let routine_ids: std::collections::HashSet<&str> = project_routines
-            .iter()
-            .map(|r| r.id.as_str())
-            .collect();
+        let routine_ids: std::collections::HashSet<&str> =
+            project_routines.iter().map(|r| r.id.as_str()).collect();
         let row_instances: Vec<RoutineInstance> = instances
             .iter()
             .filter(|i| routine_ids.contains(i.routine_id.as_str()))

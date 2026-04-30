@@ -153,9 +153,7 @@ pub async fn planner_today(
 async fn build_today(db: &Db, ctx: &AppContext) -> anyhow::Result<PlannerToday> {
     let now = Utc::now();
     let today = now.date_naive();
-    let tomorrow = today
-        .checked_add_days(Days::new(1))
-        .unwrap_or(today);
+    let tomorrow = today.checked_add_days(Days::new(1)).unwrap_or(today);
     let today_iso = today.format("%Y-%m-%d").to_string();
     let tomorrow_iso = tomorrow.format("%Y-%m-%d").to_string();
 
@@ -291,11 +289,9 @@ async fn build_today(db: &Db, ctx: &AppContext) -> anyhow::Result<PlannerToday> 
             .and_then(|pid| project_by_id.get(pid))
             .map(|p| p.name.clone());
         let days_overdue_routine = if is_overdue {
-            (today
-                - NaiveDate::parse_from_str(scheduled, "%Y-%m-%d")
-                    .unwrap_or(today))
-            .num_days()
-            .max(0)
+            (today - NaiveDate::parse_from_str(scheduled, "%Y-%m-%d").unwrap_or(today))
+                .num_days()
+                .max(0)
         } else {
             0
         };
@@ -323,18 +319,16 @@ async fn build_today(db: &Db, ctx: &AppContext) -> anyhow::Result<PlannerToday> 
     combined.extend(milestone_today_items);
     combined.extend(routine_items);
 
-    let (must_do, could_do): (Vec<_>, Vec<_>) =
-        combined.into_iter().partition(|item| is_must_do(item, &today_iso));
+    let (must_do, could_do): (Vec<_>, Vec<_>) = combined
+        .into_iter()
+        .partition(|item| is_must_do(item, &today_iso));
 
     let mut must_do = must_do;
     let mut could_do = could_do;
     must_do.sort_by(|a, b| score_of(b).total_cmp(&score_of(a)));
     could_do.sort_by(|a, b| score_of(b).total_cmp(&score_of(a)));
 
-    let top_priority = must_do
-        .first()
-        .or_else(|| could_do.first())
-        .cloned();
+    let top_priority = must_do.first().or_else(|| could_do.first()).cloned();
 
     let planner_state = planner_io::load_planner_state(&ctx.app_data_dir).unwrap_or_default();
 
@@ -355,15 +349,9 @@ fn is_must_do(item: &TodayItem, today_iso: &str) -> bool {
             deadline,
             pinned_today,
             ..
-        } => {
-            *pinned_today
-                || *days_overdue > 0
-                || deadline.as_deref() == Some(today_iso)
-        }
+        } => *pinned_today || *days_overdue > 0 || deadline.as_deref() == Some(today_iso),
         TodayItem::MilestoneDeadline { deadline, .. } => deadline.as_str() <= today_iso,
-        TodayItem::RoutineInstance { scheduled_for, .. } => {
-            scheduled_for.as_str() <= today_iso
-        }
+        TodayItem::RoutineInstance { scheduled_for, .. } => scheduled_for.as_str() <= today_iso,
     }
 }
 
@@ -426,8 +414,7 @@ pub async fn planner_session_start(
     let now = Utc::now();
     let local_date = now.date_naive().format("%Y-%m-%d").to_string();
 
-    let mut state =
-        planner_io::load_planner_state(&ctx.app_data_dir).map_err(|e| e.to_string())?;
+    let mut state = planner_io::load_planner_state(&ctx.app_data_dir).map_err(|e| e.to_string())?;
 
     // Already fired today → no-op.
     if state.last_session_date.as_deref() == Some(local_date.as_str()) {
@@ -446,10 +433,7 @@ pub async fn planner_session_start(
     // Capture a daily score snapshot derived from per-project milestone
     // caches so the rolling-30d / lifetime numbers have history.
     if let Ok(snapshot) = build_daily_snapshot(&db, &ctx, &local_date).await {
-        let exists = state
-            .score_snapshots
-            .iter()
-            .any(|s| s.date == local_date);
+        let exists = state.score_snapshots.iter().any(|s| s.date == local_date);
         if !exists {
             state.score_snapshots.push(snapshot);
         }
@@ -512,8 +496,7 @@ pub async fn planner_pause_all(
     ctx: tauri::State<'_, AppContext>,
     paused: bool,
 ) -> Result<PlannerState, String> {
-    let mut state =
-        planner_io::load_planner_state(&ctx.app_data_dir).map_err(|e| e.to_string())?;
+    let mut state = planner_io::load_planner_state(&ctx.app_data_dir).map_err(|e| e.to_string())?;
     state.paused_all = paused;
     state.paused_from = if paused {
         Some(Utc::now().to_rfc3339())
@@ -524,8 +507,7 @@ pub async fn planner_pause_all(
 
     // Cascade to every routine so the engine's per-routine guard kicks
     // in. Existing instances stay; new ones don't materialise.
-    let mut routines =
-        planner_io::load_routines(&ctx.app_data_dir).map_err(|e| e.to_string())?;
+    let mut routines = planner_io::load_routines(&ctx.app_data_dir).map_err(|e| e.to_string())?;
     for r in routines.iter_mut() {
         r.paused = paused;
         r.paused_from = state.paused_from.clone();

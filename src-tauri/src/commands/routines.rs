@@ -88,7 +88,10 @@ pub async fn refresh_all(ctx: &AppContext) -> anyhow::Result<()> {
         let s = routine_score(r, &instances);
         r.success_points = s.success_points;
         r.failing_points = s.failing_points;
-        if let crate::storage::types::Goal::Count { ref mut completed, .. } = r.goal {
+        if let crate::storage::types::Goal::Count {
+            ref mut completed, ..
+        } = r.goal
+        {
             *completed = s.completed_count as i64;
         }
     }
@@ -185,8 +188,8 @@ pub async fn routines_delete(
     ctx: tauri::State<'_, AppContext>,
     routine_id: RoutineId,
 ) -> Result<bool, String> {
-    let removed = planner_io::delete_routine(&ctx.app_data_dir, &routine_id)
-        .map_err(|e| e.to_string())?;
+    let removed =
+        planner_io::delete_routine(&ctx.app_data_dir, &routine_id).map_err(|e| e.to_string())?;
     if removed {
         let _ = events::emit_planner(&app, "planner:routine_removed", &routine_id);
     }

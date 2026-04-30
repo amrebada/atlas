@@ -101,10 +101,7 @@ pub fn load_timeline_config(app_data_dir: &Path) -> anyhow::Result<TimelineConfi
     Ok(read_json::<TimelineConfig>(&timeline_path(app_data_dir))?.unwrap_or_default())
 }
 
-pub fn save_timeline_config(
-    app_data_dir: &Path,
-    cfg: &TimelineConfig,
-) -> anyhow::Result<()> {
+pub fn save_timeline_config(app_data_dir: &Path, cfg: &TimelineConfig) -> anyhow::Result<()> {
     write_json(&timeline_path(app_data_dir), cfg)
 }
 
@@ -114,10 +111,7 @@ pub fn load_planner_state(app_data_dir: &Path) -> anyhow::Result<PlannerState> {
     Ok(read_json::<PlannerState>(&planner_state_path(app_data_dir))?.unwrap_or_default())
 }
 
-pub fn save_planner_state(
-    app_data_dir: &Path,
-    state: &PlannerState,
-) -> anyhow::Result<()> {
+pub fn save_planner_state(app_data_dir: &Path, state: &PlannerState) -> anyhow::Result<()> {
     write_json(&planner_state_path(app_data_dir), state)
 }
 

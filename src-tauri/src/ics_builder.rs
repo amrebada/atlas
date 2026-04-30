@@ -127,15 +127,12 @@ pub fn build_routine_event(routine: &Routine, project_name: Option<&str>) -> Opt
             // recurrence past the user's intent.
             if let Goal::Count { target, .. } = &routine.goal {
                 if let Some(cad) = crate::routine_engine::cadence_days_estimate(routine) {
-                    if let Ok(start) =
-                        NaiveDate::parse_from_str(&routine.start_date, "%Y-%m-%d")
-                    {
+                    if let Ok(start) = NaiveDate::parse_from_str(&routine.start_date, "%Y-%m-%d") {
                         let total_days = (cad as i64) * (*target as i64);
-                        if let Some(end) = start
-                            .checked_add_days(chrono::Days::new(total_days as u64))
+                        if let Some(end) =
+                            start.checked_add_days(chrono::Days::new(total_days as u64))
                         {
-                            rrule_line
-                                .push_str(&format!(";UNTIL={}", end.format("%Y%m%d")));
+                            rrule_line.push_str(&format!(";UNTIL={}", end.format("%Y%m%d")));
                         }
                     }
                 }
@@ -150,7 +147,10 @@ pub fn build_routine_event(routine: &Routine, project_name: Option<&str>) -> Opt
     let mut out = String::new();
     push_line(&mut out, "BEGIN:VEVENT");
     push_line(&mut out, &format!("UID:routine-{}@atlas.local", routine.id));
-    push_line(&mut out, &format!("SUMMARY:{}", escape_text(&routine.title)));
+    push_line(
+        &mut out,
+        &format!("SUMMARY:{}", escape_text(&routine.title)),
+    );
     if let Some(desc) = routine.description.as_deref() {
         if !desc.trim().is_empty() {
             push_line(&mut out, &format!("DESCRIPTION:{}", escape_text(desc)));
@@ -217,8 +217,7 @@ pub fn fold_line(line: &str) -> String {
         while end < bytes.len() && (bytes[end] & 0xC0) == 0x80 {
             end -= 1;
         }
-        let slice =
-            std::str::from_utf8(&bytes[i..end]).expect("byte boundaries respected above");
+        let slice = std::str::from_utf8(&bytes[i..end]).expect("byte boundaries respected above");
         if !first {
             out.push_str(CRLF);
             out.push(' ');
@@ -318,7 +317,11 @@ mod tests {
         let long = "X".repeat(150);
         let folded = fold_line(&long);
         for line in folded.split("\r\n") {
-            assert!(line.len() <= FOLD_LIMIT, "line {:?} exceeds {FOLD_LIMIT}", line.len());
+            assert!(
+                line.len() <= FOLD_LIMIT,
+                "line {:?} exceeds {FOLD_LIMIT}",
+                line.len()
+            );
         }
         // Continuation lines start with a single space.
         let parts: Vec<&str> = folded.split("\r\n").collect();
@@ -329,10 +332,7 @@ mod tests {
 
     #[test]
     fn escape_text_handles_special_chars() {
-        assert_eq!(
-            escape_text("a, b; c\nd\\e"),
-            "a\\, b\\; c\\nd\\\\e"
-        );
+        assert_eq!(escape_text("a, b; c\nd\\e"), "a\\, b\\; c\\nd\\\\e");
     }
 
     #[test]
@@ -365,20 +365,14 @@ mod tests {
 
     #[test]
     fn routine_event_explicit_count_bound_passes_through() {
-        let r = mk_routine(
-            "FREQ=DAILY;COUNT=5",
-            Goal::Indefinite,
-        );
+        let r = mk_routine("FREQ=DAILY;COUNT=5", Goal::Indefinite);
         let evt = build_routine_event(&r, None).unwrap();
         assert!(evt.contains("RRULE:FREQ=DAILY;COUNT=5\r\n"));
     }
 
     #[test]
     fn routine_event_weekly_byday() {
-        let r = mk_routine(
-            "FREQ=WEEKLY;BYDAY=MO,FR",
-            Goal::Indefinite,
-        );
+        let r = mk_routine("FREQ=WEEKLY;BYDAY=MO,FR", Goal::Indefinite);
         let evt = build_routine_event(&r, Some("Atlas")).unwrap();
         assert!(evt.contains("RRULE:FREQ=WEEKLY;BYDAY=MO,FR"));
     }

@@ -35,12 +35,7 @@ async fn emit_count(app: &AppHandle, state: &Db, project_id: &str) {
 /// Recompute one or two milestones (deduped) after a todo write.
 /// Errors are logged but not propagated — score cache freshness
 /// shouldn't block the user's edit.
-async fn refresh_milestones(
-    state: &Db,
-    project_id: &str,
-    a: Option<&str>,
-    b: Option<&str>,
-) {
+async fn refresh_milestones(state: &Db, project_id: &str, a: Option<&str>, b: Option<&str>) {
     let mut seen: Option<&str> = None;
     for id in [a, b].into_iter().flatten() {
         if seen == Some(id) {

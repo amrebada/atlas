@@ -180,11 +180,7 @@ pub async fn milestones_set_status(
         .map_err(|e| e.to_string())?;
     let score = milestone_score(&todos, Utc::now());
     // Auto-extension cost stays in `failing_points` even after recompute.
-    let extension_fail: f64 = m
-        .extensions
-        .iter()
-        .map(|e| e.failing_points_applied)
-        .sum();
+    let extension_fail: f64 = m.extensions.iter().map(|e| e.failing_points_applied).sum();
     m.success_points = score.success_points;
     m.failing_points = score.failing_points + extension_fail;
 
@@ -234,11 +230,7 @@ pub async fn recompute_milestone_score(
     };
     let todos = db.milestone_member_todos(project_id, milestone_id).await?;
     let score = milestone_score(&todos, Utc::now());
-    let extension_fail: f64 = m
-        .extensions
-        .iter()
-        .map(|e| e.failing_points_applied)
-        .sum();
+    let extension_fail: f64 = m.extensions.iter().map(|e| e.failing_points_applied).sum();
     m.success_points = score.success_points;
     m.failing_points = score.failing_points + extension_fail;
     db.milestones_upsert(project_id, &m).await
