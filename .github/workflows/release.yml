@@ -10,10 +10,35 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.platform }} ${{ matrix.args }}
+  create-release:
+    name: Create release
+    runs-on: ubuntu-latest
     permissions:
       contents: write
+
+    steps:
+      - name: Create or reuse release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "${{ github.ref_name }}" \
+               --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "release ${{ github.ref_name }} already exists; reusing"
+            exit 0
+          fi
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "Atlas ${{ github.ref_name }}" \
+            --notes "See CHANGELOG.md for release notes."
+
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.args }}
+    needs: create-release
+    permissions:
+      contents: write
+
     strategy:
       fail-fast: false
       matrix:
@@ -22,18 +47,26 @@ jobs:
             args: "--target aarch64-apple-darwin"
             rust-target: aarch64-apple-darwin
             updater-key: darwin-aarch64
+            bundle-dir: src-tauri/target/aarch64-apple-darwin/release/bundle/macos
+            bundle-pattern: "*.app.tar.gz"
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
             rust-target: x86_64-apple-darwin
             updater-key: darwin-x86_64
+            bundle-dir: src-tauri/target/x86_64-apple-darwin/release/bundle/macos
+            bundle-pattern: "*.app.tar.gz"
           - platform: ubuntu-22.04
             args: ""
             rust-target: ""
             updater-key: linux-x86_64
+            bundle-dir: src-tauri/target/release/bundle/appimage
+            bundle-pattern: "*.AppImage.tar.gz"
           - platform: windows-latest
             args: ""
             rust-target: ""
             updater-key: windows-x86_64
+            bundle-dir: src-tauri/target/release/bundle/nsis
+            bundle-pattern: "*-setup.nsis.zip"
 
     runs-on: ${{ matrix.platform }}
 
@@ -73,111 +106,87 @@ jobs:
             libgtk-3-dev \
             libssl-dev
 
+      - name: Import Apple Developer cert
+        if: startsWith(matrix.platform, 'macos')
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build and (best-effort) upload Tauri bundle
-        # @v0 is the floating tag — it'll create the release and upload
-        # the user-facing bundles (.dmg, .deb, .msi, etc). We don't
-        # rely on it for `.sig` files or `latest.json` — those are
-        # handled by the next two steps.
-        uses: tauri-apps/tauri-action@v0
+      - name: Build Tauri bundle
+        # Tauri 2 auto-signs the updater bundles when
+        # `TAURI_SIGNING_PRIVATE_KEY` is set, and auto-notarises the
+        # macOS bundle when `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID`
+        # are set. The signed `<bundle>.sig` files land in the same
+        # directory as the bundles.
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          pnpm tauri build ${{ matrix.args }}
 
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Atlas ${{ github.ref_name }}"
-          releaseBody: "See CHANGELOG.md for release notes."
-          releaseDraft: false
-          prerelease: false
-          args: ${{ matrix.args }}
-
-      - name: Locate updater bundle + signature
+      - name: Stage updater bundle + signature
         id: updater
         shell: bash
         run: |
           set -euo pipefail
 
-          # The updater plugin emits `<bundle>` + `<bundle>.sig` per
-          # platform. We pick the first match and emit them as outputs
-          # for the next step.
-          case "${{ matrix.updater-key }}" in
-            darwin-*)
-              SEARCH_DIR="src-tauri/target/${{ matrix.rust-target }}/release/bundle/macos"
-              PATTERN="*.app.tar.gz"
-              ;;
-            linux-*)
-              SEARCH_DIR="src-tauri/target/release/bundle/appimage"
-              PATTERN="*.AppImage.tar.gz"
-              ;;
-            windows-*)
-              SEARCH_DIR="src-tauri/target/release/bundle/nsis"
-              PATTERN="*-setup.nsis.zip"
-              ;;
-          esac
-
-          if [ ! -d "$SEARCH_DIR" ]; then
-            echo "::warning::No bundle dir at $SEARCH_DIR — skipping"
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # `find` so this works on Windows runners too (no `ls` glob).
-          BUNDLE=$(find "$SEARCH_DIR" -maxdepth 1 -name "$PATTERN" ! -name "*.sig" | head -n 1)
+          BUNDLE=$(find "${{ matrix.bundle-dir }}" -maxdepth 1 \
+                       -name "${{ matrix.bundle-pattern }}" ! -name "*.sig" \
+                   | head -n 1 || true)
           if [ -z "$BUNDLE" ] || [ ! -f "$BUNDLE" ]; then
-            echo "::warning::No updater bundle matching $PATTERN in $SEARCH_DIR"
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::No updater bundle matching ${{ matrix.bundle-pattern }} in ${{ matrix.bundle-dir }}"
+            exit 1
           fi
-
           SIG="${BUNDLE}.sig"
           if [ ! -f "$SIG" ]; then
-            echo "::warning::No signature next to $BUNDLE"
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::No .sig next to $BUNDLE — TAURI_SIGNING_PRIVATE_KEY didn't take effect"
+            exit 1
           fi
 
-          # Stable upload name keyed on platform so each run overwrites
-          # the previous one cleanly.
-          BASENAME=$(basename "$BUNDLE")
-          UPLOAD_NAME="${{ matrix.updater-key }}-$BASENAME"
-
-          # Stage the file in $RUNNER_TEMP under the upload name so the
-          # remote asset name matches.
+          # Stable upload name keyed on platform so re-runs overwrite
+          # the previous asset cleanly.
+          UPLOAD_NAME="${{ matrix.updater-key }}-$(basename "$BUNDLE")"
           STAGED_BUNDLE="$RUNNER_TEMP/$UPLOAD_NAME"
           STAGED_SIG="$RUNNER_TEMP/$UPLOAD_NAME.sig"
           cp "$BUNDLE" "$STAGED_BUNDLE"
           cp "$SIG" "$STAGED_SIG"
 
           {
-            echo "found=true"
-            echo "platform=${{ matrix.updater-key }}"
             echo "bundle=$STAGED_BUNDLE"
             echo "sig=$STAGED_SIG"
-            echo "name=$UPLOAD_NAME"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Upload updater bundle + signature
-        if: steps.updater.outputs.found == 'true'
+      - name: Upload bundles + signature
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release upload "${{ github.ref_name }}" \
-            "${{ steps.updater.outputs.bundle }}" \
-            "${{ steps.updater.outputs.sig }}" \
+
+          # Collect every user-facing bundle that tauri build produced
+          # (.dmg, .deb, .AppImage, .msi, etc.) plus the staged updater
+          # tarball + sig.
+          ASSETS=()
+          while IFS= read -r f; do
+            ASSETS+=("$f")
+          done < <(find src-tauri/target -type f \
+            \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \
+               -o -name "*.msi" -o -name "*-setup.exe" \) 2>/dev/null)
+
+          ASSETS+=("${{ steps.updater.outputs.bundle }}")
+          ASSETS+=("${{ steps.updater.outputs.sig }}")
+
+          gh release upload "${{ github.ref_name }}" "${ASSETS[@]}" \
             --clobber \
             --repo "${{ github.repository }}"
 
@@ -201,15 +210,11 @@ jobs:
           WORK=$(mktemp -d)
           cd "$WORK"
 
-          # Pull every .sig the build jobs uploaded.
           gh release download "$TAG" --repo "$REPO" --pattern "*.sig"
 
           VERSION="${TAG#v}"
           PUBDATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          # Build a `platforms` object by pairing each known sig with
-          # its bundle URL. Missing platforms are simply omitted —
-          # that's safer than emitting an entry with a blank signature.
           PLATFORMS_JSON="{}"
           for KEY in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
             SIG_FILE=$(ls "${KEY}-"*.sig 2>/dev/null | head -n 1 || true)
@@ -220,7 +225,6 @@ jobs:
             BUNDLE_NAME="${SIG_FILE%.sig}"
             URL="https://github.com/$REPO/releases/download/$TAG/$BUNDLE_NAME"
             SIG=$(cat "$SIG_FILE")
-
             PLATFORMS_JSON=$(jq \
               --arg key "$KEY" \
               --arg sig "$SIG" \
@@ -241,7 +245,5 @@ jobs:
             }' > latest.json
 
           cat latest.json
-
           gh release upload "$TAG" latest.json \
-            --clobber \
-            --repo "$REPO"
+            --clobber --repo "$REPO"
