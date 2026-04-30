@@ -98,6 +98,34 @@ export type EditorEntry = { id: string, name: string, cmd: string, present: bool
 
 export type EditorsSettings = { detected: Array<EditorEntry>, defaultId: string | null, };
 
+/**
+ * One entry in a Milestone or Routine's `extensions` log. The shape is
+ * shared between both because the surfaces are identical.
+ */
+export type ExtensionEvent = { 
+/**
+ * ISO-8601 — date being moved away from.
+ */
+from: string, 
+/**
+ * ISO-8601 — new target date.
+ */
+to: string, reason: ExtensionReason, failingPointsApplied: number, 
+/**
+ * ISO-8601 — when the extension was recorded.
+ */
+at: string, 
+/**
+ * Optional free-form note ("scope grew", "external dep slipped").
+ */
+note: string | null, };
+
+/**
+ * Why a deadline was extended. Determines whether the akrasia-horizon
+ * cost applies.
+ */
+export type ExtensionReason = "auto-missed" | "user-soften" | "user-override" | "paused";
+
 export type FileKind = "dir" | "file";
 
 export type FileNode = { depth: number, name: string, path: string, kind: FileKind, 
@@ -143,11 +171,54 @@ export type GitPollInterval = "10s" | "30s" | "1m" | "off";
 
 export type GitSettings = { pollInterval: GitPollInterval, showAuthor: boolean, defaultCloneDepth: CloneDepth, sshKey: string, };
 
+/**
+ * Goal definition attached to a Routine. The TypeScript shape is a
+ * discriminated union on `kind`.
+ */
+export type Goal = { "kind": "count", target: number, 
+/**
+ * Running tally of completed instances. Maintained by the engine.
+ */
+completed: number, } | { "kind": "deadline", until: string, } | { "kind": "indefinite" };
+
 export type Lang = "TypeScript" | "JavaScript" | "Rust" | "Go" | "Python" | "Swift" | "Kotlin" | "Ruby" | "Java" | "C" | "C++" | "Other";
+
+/**
+ * A milestone groups a set of todos under a single deadline within a
+ * project.
+ */
+export type Milestone = { id: string, projectId: string, title: string, description: string | null, 
+/**
+ * ISO-8601 — current target date.
+ */
+deadline: string, 
+/**
+ * ISO-8601 — first-set target. Immutable after first save; what the
+ * "extended to X instead of Y" warning anchors to.
+ */
+originalDeadline: string, status: MilestoneStatus, priority: Priority, order: number, 
+/**
+ * Ordered membership; todos retain their own ordering for display.
+ */
+todoIds: Array<string>, extensions: Array<ExtensionEvent>, 
+/**
+ * Running success points accrued from member todos.
+ */
+successPoints: number, 
+/**
+ * Running failing points accrued from late/missed todos and from
+ * soften-extensions inside the akrasia horizon.
+ */
+failingPoints: number, createdAt: string, doneAt: string | null, };
+
+/**
+ * Lifecycle state of a Milestone.
+ */
+export type MilestoneStatus = "planned" | "active" | "done" | "missed" | "cancelled";
 
 export type Note = { id: string, title: string, body: string, pinned: boolean, createdAt: string, updatedAt: string, };
 
-export type PaletteItem = { "kind": "project", project: Project, score: number, } | { "kind": "recent", project: Project, } | { "kind": "note", projectId: string, noteId: string, title: string, snippet: string, score: number, } | { "kind": "action", id: string, label: string, hint: string, keys: Array<string>, };
+export type PaletteItem = { "kind": "project", project: Project, score: number, } | { "kind": "recent", project: Project, } | { "kind": "note", projectId: string, noteId: string, title: string, snippet: string, score: number, } | { "kind": "milestone", projectId: string, projectName: string, milestoneId: string, title: string, deadline: string, priority: Priority, status: MilestoneStatus, score: number, } | { "kind": "routine", routineId: string, projectId: string | null, projectName: string | null, title: string, rrule: string, priority: Priority, score: number, } | { "kind": "action", id: string, label: string, hint: string, keys: Array<string>, };
 
 export type Pane = { id: string, kind: PaneKind, title: string, status: PaneStatus, cwd: string, branch: string | null, scriptId: string | null, sessionId: string | null, };
 
@@ -172,6 +243,47 @@ export type PaneSnapshot = { id: string,
 kind: string, title: string, cwd: string, scriptId: string | null, sessionId: string | null, };
 
 export type PaneStatus = "idle" | "running" | "active" | "error";
+
+/**
+ * Global planner state — pause flag, last notification bookkeeping,
+ * rolling score snapshots.
+ */
+export type PlannerState = { 
+/**
+ * Pause-all is the vacation safety valve. While true, no new
+ * failing points accrue across any routine or milestone.
+ */
+pausedAll: boolean, 
+/**
+ * ISO-8601 — when paused_all flipped on.
+ */
+pausedFrom: string | null, 
+/**
+ * ISO-8601 — last time the headline notification fired.
+ */
+lastNotificationAt: string | null, 
+/**
+ * `YYYY-MM-DD` (local) — last day the session-start notification
+ * fired. Compared against today to enforce "once per day".
+ */
+lastSessionDate: string | null, scoreSnapshots: Array<ScoreSnapshot>, };
+
+export type PlannerToday = { mustDo: Array<TodayItem>, couldDo: Array<TodayItem>, topPriority: TodayItem | null, deadlinesTomorrow: Array<TodayItem>, 
+/**
+ * Sum of estimates across must-do items, in minutes.
+ */
+totalEstimateMinutes: number, 
+/**
+ * True when the global pause-all flag is set; the UI uses this to
+ * pulse a banner so the user remembers they paused.
+ */
+pausedAll: boolean, };
+
+/**
+ * Importance bucket for todos, milestones, and routines. Drives the
+ * scoring weights in `score_engine` (P0=2× / P1=1.5× / P2=1× / P3=0.5×).
+ */
+export type Priority = "p0" | "p1" | "p2" | "p3";
 
 export type Project = { id: string, name: string, path: string, language: Lang, color: string, branch: string, dirty: number, ahead: number, behind: number, loc: number, size: string, sizeBytes: number, 
 /**
@@ -219,6 +331,63 @@ filesRepaired: number,
  */
 issues: Array<string>, };
 
+/**
+ * A recurring task definition. Cadence is RFC 5545 RRULE; instances
+ * are materialised to `RoutineInstance` records.
+ */
+export type Routine = { id: string, 
+/**
+ * Optional — `None` means a global routine spanning all projects.
+ */
+projectId: string | null, title: string, description: string | null, 
+/**
+ * RFC 5545 RRULE without the `RRULE:` prefix.
+ */
+rrule: string, 
+/**
+ * ISO-8601 date the recurrence anchors on.
+ */
+startDate: string, goal: Goal, priority: Priority, 
+/**
+ * Estimated minutes per instance (for workload bar).
+ */
+estimate: bigint | null, paused: boolean, 
+/**
+ * ISO-8601 timestamp the pause began.
+ */
+pausedFrom: string | null, successPoints: number, failingPoints: number, extensions: Array<ExtensionEvent>, createdAt: string, };
+
+/**
+ * One materialised occurrence of a Routine. Generated lazily by the
+ * engine up to `MAX_HORIZON_DAYS` ahead.
+ */
+export type RoutineInstance = { id: string, routineId: string, 
+/**
+ * ISO-8601 date the instance is due (strict / calendar-anchored).
+ */
+scheduledFor: string, doneAt: string | null, skipped: boolean | null, 
+/**
+ * Days added to the routine's projected goal-completion date when
+ * this instance was missed.
+ */
+extensionContribution: number, failingPoints: number, successPoints: number, };
+
+/**
+ * One snapshot of project / lifetime success rate. The score engine
+ * appends a daily snapshot so charts and rolling-30d numbers exist.
+ */
+export type ScoreSnapshot = { 
+/**
+ * ISO-8601 date the snapshot represents.
+ */
+date: string, successPoints: number, failingPoints: number, 
+/**
+ * success_points / (success_points + failing_points), or 1.0 if both 0.
+ */
+successRate: number, };
+
+export type ScoreSummary = { lifetime: ScoreSnapshot, rolling30d: ScoreSnapshot, daily: Array<ScoreSnapshot>, };
+
 export type Script = { id: string, name: string, cmd: string, desc: string | null, group: ScriptGroup, default: boolean | null, icon: string | null, env_defaults: Array<ScriptEnvVar>, };
 
 export type ScriptEnvVar = { key: string, default: string, };
@@ -226,6 +395,21 @@ export type ScriptEnvVar = { key: string, default: string, };
 export type ScriptGroup = "run" | "build" | "check" | "util";
 
 export type Session = { id: string, projectPath: string, title: string, when: string, turns: number, duration: string, status: SessionStatus, last: string, model: string, branch: string | null, };
+
+export type SessionStartResult = { 
+/**
+ * True when the headline notification just fired (first session of
+ * the local day). False on subsequent calls within the same day.
+ */
+fired: boolean, 
+/**
+ * Local `YYYY-MM-DD` of the session start.
+ */
+localDate: string, 
+/**
+ * Snapshot of today right at session start, if the call fired.
+ */
+today: PlannerToday | null, };
 
 export type SessionStatus = "active" | "idle" | "archived";
 
@@ -237,6 +421,90 @@ export type Template = { id: string, label: string, color: string, hint: string,
 
 export type Theme = "dark" | "light" | "system";
 
-export type Todo = { id: string, done: boolean, text: string, due: string | null, createdAt: string, };
+/**
+ * Which projects appear in the cross-project timeline view. Curated by
+ * the user via `TimelineProjectPicker`.
+ */
+export type TimelineConfig = { 
+/**
+ * User-pinned projects. Order matters (renders top-to-bottom).
+ */
+pinnedProjectIds: Array<string>, 
+/**
+ * Default visible range — `"week"` or `"month"`.
+ */
+visibleRange: string, };
+
+export type TimelineData = { config: TimelineConfig, rows: Array<TimelineRow>, 
+/**
+ * Inclusive start of the visible window, `YYYY-MM-DD`.
+ */
+start: string, 
+/**
+ * Inclusive end of the visible window, `YYYY-MM-DD`.
+ */
+end: string, 
+/**
+ * Today in local time, `YYYY-MM-DD`.
+ */
+today: string, };
+
+/**
+ * One row in the timeline — a single pinned project with its
+ * milestones and project-scoped routine instances clipped to the
+ * visible window.
+ */
+export type TimelineRow = { projectId: string, projectName: string, 
+/**
+ * Hex color of the project — drives bar fill.
+ */
+projectColor: string, milestones: Array<Milestone>, routines: Array<Routine>, routineInstances: Array<RoutineInstance>, };
+
+/**
+ * One Today-view item. Discriminated on `kind` so the React side can
+ * render todos / milestones / routine-instances with one component
+ * list.
+ */
+export type TodayItem = { "kind": "todo", id: string, projectId: string, projectName: string, text: string, priority: Priority, deadline: string | null, score: number, daysOverdue: number, pinnedToday: boolean, } | { "kind": "milestone-deadline", id: string, projectId: string, projectName: string, title: string, deadline: string, priority: Priority, score: number, } | { "kind": "routine-instance", id: string, routineId: string, projectId: string | null, projectName: string | null, title: string, scheduledFor: string, priority: Priority, score: number, };
+
+export type Todo = { id: string, done: boolean, text: string, 
+/**
+ * Legacy free-form due label (e.g. `"today"`, `"fri"`, ISO-8601).
+ * Preserved for backward compatibility; new writes prefer `deadline`.
+ */
+due: string | null, createdAt: string, 
+/**
+ * Owning project id. Optional during migration window — populated by
+ * the upsert path going forward.
+ */
+projectId: string | null, 
+/**
+ * Membership in a project milestone.
+ */
+milestoneId: string | null, 
+/**
+ * Set when this todo was generated by a routine instance.
+ */
+routineInstanceId: string | null, 
+/**
+ * Importance bucket. Defaults to P2 when absent.
+ */
+priority: Priority | null, 
+/**
+ * Structured ISO-8601 deadline. Replaces free-form `due` in new writes.
+ */
+deadline: string | null, 
+/**
+ * Estimated minutes-of-work (for the workload bar).
+ */
+estimate: bigint | null, 
+/**
+ * User explicitly pinned this todo into Today, overriding scoring.
+ */
+pinnedToday: boolean | null, 
+/**
+ * ISO-8601 completion timestamp (set when `done` flips to true).
+ */
+doneAt: string | null, };
 
 export type WatchRoot = { path: string, depth: number, repoCount: number, };

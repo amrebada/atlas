@@ -15,6 +15,9 @@ import { ContextMenu } from "./features/context-menu/ContextMenu";
 import { BulkActionBar } from "./features/multi-select/BulkActionBar";
 import { CheatSheetOverlay } from "./features/help/CheatSheetOverlay";
 import { TerminalStrip } from "./features/terminal/TerminalStrip";
+import { TodayView } from "./features/planner/TodayView";
+import { TimelineView } from "./features/planner/TimelineView";
+import { useTopPriorityNotification } from "./features/planner/useTopPriorityNotification";
 import { useTerminalStore } from "./features/terminal/layout";
 import { getSettings, listProjects, listWatchers } from "./ipc";
 import type { Settings } from "./types";
@@ -69,6 +72,10 @@ function AppInner() {
 
   // Terminal strip ↔ project sync. Lives at the App level (not inside
   useTerminalProjectSync(selectedProjectId);
+
+  // Planner — fire the headline notification on first session of the
+  // local day, and listen for backend-pushed planner events.
+  useTopPriorityNotification();
 
   // Hydrate the Zustand UI store from persisted settings. The store is
   const setTheme = useUiStore((s) => s.setTheme);
@@ -249,6 +256,12 @@ function AppInner() {
       <ContextMenu projects={projects} />
       <BulkActionBar projects={projects} />
       <CheatSheetOverlay />
+
+      {/* Planner: full-screen Today modal. The TitleBar's TodayBadge
+          opens it; ⌘T toggles it. Renders `null` when closed. */}
+      <TodayView />
+      {/* Planner: cross-project timeline. Title-bar grid icon or ⌘⇧T. */}
+      <TimelineView />
 
       {/* Full-bleed Tiptap note editor. Mounted here so it can
           cover sidebar + inspector via a Portal while staying under the

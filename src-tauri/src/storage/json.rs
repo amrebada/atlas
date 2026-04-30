@@ -44,7 +44,7 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> anyhow::Result<()> {
 }
 
 /// Serialize `value` and write it to `path` atomically.
-pub fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
+pub fn write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> anyhow::Result<()> {
     let mut data = serde_json::to_vec_pretty(value)?;
     // Trailing newline keeps `git diff` stable and matches POSIX text
     if !data.ends_with(b"\n") {

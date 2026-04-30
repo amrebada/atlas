@@ -90,6 +90,14 @@ pub fn emit_project_removed(app: &AppHandle, id: &str) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("emit project:removed: {e}"))
 }
 
+/// Generic planner-feature event emitter. The frontend listens for
+/// `planner:routine_changed`, `planner:milestone_changed`,
+/// `planner:notification`, etc., and refreshes the relevant query.
+pub fn emit_planner(app: &AppHandle, channel: &str, payload: &str) -> anyhow::Result<()> {
+    app.emit(channel, payload)
+        .map_err(|e| anyhow::anyhow!("emit {channel}: {e}"))
+}
+
 /// Emit `git:status { id, dirty, ahead, behind, branch, author? }`.
 pub fn emit_git_status(app: &AppHandle, id: &str, status: &GitStatus) -> anyhow::Result<()> {
     app.emit(

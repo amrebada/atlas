@@ -10,6 +10,8 @@ import { Files } from "./tabs/Files";
 import { Sessions } from "./tabs/Sessions";
 import { Scripts } from "./tabs/Scripts";
 import { Todos } from "./tabs/Todos";
+import { Milestones } from "./tabs/Milestones";
+import { Routines } from "./tabs/Routines";
 import { Notes } from "./tabs/Notes";
 import { Disk } from "./tabs/Disk";
 
@@ -124,6 +126,8 @@ export function Inspector({ project }: InspectorProps) {
         {activeTab === "sessions" && <Sessions project={project} />}
         {activeTab === "scripts" && <Scripts project={project} />}
         {activeTab === "todos" && <Todos project={project} />}
+        {activeTab === "milestones" && <Milestones project={project} />}
+        {activeTab === "routines" && <Routines project={project} />}
         {activeTab === "notes" && <Notes project={project} />}
         {activeTab === "disk" && <Disk project={project} />}
       </div>

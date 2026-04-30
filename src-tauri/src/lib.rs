@@ -12,7 +12,10 @@ mod editors;
 mod events;
 mod git;
 mod metrics;
+mod ics_builder;
 mod path_bootstrap;
+mod routine_engine;
+mod score_engine;
 mod scripts;
 mod sessions;
 pub mod storage;
@@ -216,6 +219,37 @@ pub fn run() {
             commands::pane_layout::pane_layout_save,
             commands::pane_layout::pane_layout_clear,
             commands::templates::templates_create_project,
+            // Planner feature — P1 schema only; handlers stubbed until
+            // their respective phases (P2 milestones, P3 routines, P4 today).
+            commands::milestones::milestones_list,
+            commands::milestones::milestones_create,
+            commands::milestones::milestones_update,
+            commands::milestones::milestones_extend,
+            commands::milestones::milestones_set_status,
+            commands::milestones::milestones_delete,
+            commands::routines::routines_list,
+            commands::routines::routines_create,
+            commands::routines::routines_update,
+            commands::routines::routines_delete,
+            commands::routines::routines_pause,
+            commands::routines::routines_instances,
+            commands::routines::routines_complete_instance,
+            commands::routines::routines_skip_instance,
+            commands::routines::routines_materialize,
+            commands::routines::routines_projected_completion,
+            commands::planner::planner_today,
+            commands::planner::planner_session_start,
+            commands::planner::planner_pause_all,
+            commands::planner::planner_score_summary,
+            commands::planner::planner_extension_log,
+            commands::timeline::timeline_config_get,
+            commands::timeline::timeline_pin_project,
+            commands::timeline::timeline_unpin_project,
+            commands::timeline::timeline_set_range,
+            commands::timeline::timeline_query,
+            commands::ics::ics_export_all,
+            commands::ics::ics_export_project,
+            commands::ics::ics_reveal_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Atlas");

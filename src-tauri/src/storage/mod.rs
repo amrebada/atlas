@@ -5,6 +5,8 @@
 pub mod db;
 pub mod discovery;
 pub mod json;
+pub mod migrate;
+pub mod planner_io;
 pub mod settings;
 pub mod sync;
 pub mod templates;
@@ -16,11 +18,13 @@ pub use db::Db;
 pub use discovery::{scan_root, DiscoveredRepo};
 pub use types::{
     AdvancedSettings, CloneDepth, Collection, CollectionId, DiscoveryResult, EditorEntry,
-    EditorsSettings, FileKind, FileNode, FullLiteral, GeneralSettings, GitPollInterval,
-    GitSettings, Lang, Note, NoteId, PaletteItem, Pane, PaneId, PaneKind, PaneLayout, PaneSnapshot,
-    PaneStatus, Project, ProjectFilter, ProjectId, ProjectSource, Script, ScriptGroup, ScriptId,
-    Session, SessionId, SessionStatus, Settings, Template, TemplateId, Theme, Todo, TodoId,
-    WatchRoot,
+    EditorsSettings, ExtensionEvent, ExtensionReason, FileKind, FileNode, FullLiteral,
+    GeneralSettings, GitPollInterval, GitSettings, Goal, Lang, Milestone, MilestoneId,
+    MilestoneStatus, Note, NoteId, PaletteItem, Pane, PaneId, PaneKind, PaneLayout, PaneSnapshot,
+    PaneStatus, PlannerState, Priority, Project, ProjectFilter, ProjectId, ProjectSource, Routine,
+    RoutineId, RoutineInstance, RoutineInstanceId, ScoreSnapshot, Script, ScriptGroup, ScriptId,
+    Session, SessionId, SessionStatus, Settings, Template, TemplateId, Theme, TimelineConfig, Todo,
+    TodoId, WatchRoot,
 };
 
 /// Bundle of long-lived resources the settings + templates commands need.

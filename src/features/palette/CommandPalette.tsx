@@ -46,12 +46,27 @@ interface FlatRow {
   action?: (typeof STATIC_ACTIONS)[number];
   // Note variant (shown when palette_query returns note matches).
   note?: { projectId: string; noteId: string; title: string; snippet: string };
+  // Milestone variant (shown when palette_query returns milestone matches).
+  milestone?: {
+    projectId: string;
+    projectName: string;
+    title: string;
+    deadline: string;
+  };
+  // Routine variant (shown when palette_query returns routine matches).
+  routine?: {
+    projectId: string | null;
+    projectName: string | null;
+    title: string;
+    rrule: string;
+  };
 }
 
 export function CommandPalette() {
   const open = useUiStore((s) => s.paletteOpen);
   const setOpen = useUiStore((s) => s.setPaletteOpen);
   const setSelectedProjectId = useUiStore((s) => s.setSelectedProjectId);
+  const setActiveInspectorTab = useUiStore((s) => s.setActiveInspectorTab);
   const pushToast = useUiStore((s) => s.pushToast);
   const openNewProject = useUiStore((s) => s.openNewProject);
   const openSettings = useUiStore((s) => s.openSettings);
@@ -144,6 +159,45 @@ export function CommandPalette() {
             pushToast("info", `Opened ${it.title}`);
           },
         });
+      } else if (it.kind === "milestone") {
+        rows.push({
+          key: `milestone-${it.milestoneId}`,
+          section: "project",
+          milestone: {
+            projectId: it.projectId,
+            projectName: it.projectName,
+            title: it.title,
+            deadline: it.deadline,
+          },
+          onEnter: () => {
+            setSelectedProjectId(it.projectId);
+            setActiveInspectorTab("milestones");
+          },
+        });
+      } else if (it.kind === "routine") {
+        rows.push({
+          key: `routine-${it.routineId}`,
+          section: "project",
+          routine: {
+            projectId: it.projectId,
+            projectName: it.projectName,
+            title: it.title,
+            rrule: it.rrule,
+          },
+          onEnter: () => {
+            // Global routines have no project; jump to wherever the
+            // user currently is and just toast for v1.
+            if (it.projectId) {
+              setSelectedProjectId(it.projectId);
+              setActiveInspectorTab("routines");
+            } else {
+              pushToast(
+                "info",
+                "Global routine — open Routines from any project",
+              );
+            }
+          },
+        });
       }
       // Palette_query `action` rows are superseded by the static list below.
     }
@@ -186,6 +240,7 @@ export function CommandPalette() {
     openSettings,
     pushToast,
     setSelectedProjectId,
+    setActiveInspectorTab,
   ]);
 
   // Clamp selection whenever the flat list shrinks (e.g. typing narrows
@@ -288,6 +343,48 @@ export function CommandPalette() {
                 }}
               >
                 {row.note.snippet}
+              </span>
+            </span>
+          </>
+        ) : row.milestone ? (
+          <>
+            <Icon
+              name="clock"
+              size={13}
+              stroke={active ? "var(--accent)" : "var(--text-dim)"}
+            />
+            <span style={{ flex: 1 }}>
+              {row.milestone.title}
+              <span
+                style={{
+                  marginLeft: 8,
+                  fontSize: 10,
+                  fontFamily: "var(--mono)",
+                  color: "var(--text-dimmer)",
+                }}
+              >
+                {row.milestone.projectName} · {row.milestone.deadline}
+              </span>
+            </span>
+          </>
+        ) : row.routine ? (
+          <>
+            <Icon
+              name="branch"
+              size={13}
+              stroke={active ? "var(--accent)" : "var(--text-dim)"}
+            />
+            <span style={{ flex: 1 }}>
+              {row.routine.title}
+              <span
+                style={{
+                  marginLeft: 8,
+                  fontSize: 10,
+                  fontFamily: "var(--mono)",
+                  color: "var(--text-dimmer)",
+                }}
+              >
+                {row.routine.projectName ?? "global"} · {row.routine.rrule}
               </span>
             </span>
           </>

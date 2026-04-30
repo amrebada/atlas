@@ -4,7 +4,8 @@ use crate::git::GitStatus;
 use crate::storage::discovery::{scan_root, scan_root_with_progress, DiscoveredRepo};
 use crate::storage::json::{atlas_file, atlas_note_file, read_json, write_json};
 use crate::storage::types::{
-    Collection, Lang, Note, PaletteItem, PaneLayout, Project, ProjectFilter, Script, Todo,
+    Collection, Lang, Milestone, Note, PaletteItem, PaneLayout, Project, ProjectFilter, Script,
+    Todo,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
@@ -1045,6 +1046,95 @@ impl Db {
             .await?
             .ok_or_else(|| anyhow::anyhow!("unknown project id: {project_id}"))?;
         Ok(PathBuf::from(project.path))
+    }
+
+    // =================================================================
+    // Milestones — per-project `<project>/.atlas/milestones.json`. Score
+    // recomputation lives in `commands/milestones.rs` because it needs
+    // a "now" reference; persistence here is intentionally dumb storage.
+
+    pub async fn milestones_list(&self, project_id: &str) -> anyhow::Result<Vec<Milestone>> {
+        let project_path = self.project_path_for(project_id).await?;
+        let file = atlas_file(&project_path, "milestones");
+        Ok(read_json::<Vec<Milestone>>(&file)?.unwrap_or_default())
+    }
+
+    pub async fn milestones_get(
+        &self,
+        project_id: &str,
+        milestone_id: &str,
+    ) -> anyhow::Result<Option<Milestone>> {
+        let all = self.milestones_list(project_id).await?;
+        Ok(all.into_iter().find(|m| m.id == milestone_id))
+    }
+
+    pub async fn milestones_upsert(
+        &self,
+        project_id: &str,
+        milestone: &Milestone,
+    ) -> anyhow::Result<()> {
+        let project_path = self.project_path_for(project_id).await?;
+        let file = atlas_file(&project_path, "milestones");
+        let mut all: Vec<Milestone> = read_json(&file)?.unwrap_or_default();
+        if let Some(slot) = all.iter_mut().find(|m| m.id == milestone.id) {
+            *slot = milestone.clone();
+        } else {
+            all.push(milestone.clone());
+        }
+        write_json(&file, &all)?;
+        Ok(())
+    }
+
+    /// Delete a milestone. Returns `true` if it was present. Member
+    /// todos have their `milestone_id` cleared so they orphan back to
+    /// the project root (D4 in the plan §12).
+    pub async fn milestones_delete(
+        &self,
+        project_id: &str,
+        milestone_id: &str,
+    ) -> anyhow::Result<bool> {
+        let project_path = self.project_path_for(project_id).await?;
+
+        // Orphan member todos first so a delete failure on the
+        // milestones file doesn't leave dangling references.
+        let todos_file = atlas_file(&project_path, "todos");
+        let mut todos: Vec<Todo> = read_json(&todos_file)?.unwrap_or_default();
+        let mut touched = false;
+        for t in todos.iter_mut() {
+            if t.milestone_id.as_deref() == Some(milestone_id) {
+                t.milestone_id = None;
+                touched = true;
+            }
+        }
+        if touched {
+            write_json(&todos_file, &todos)?;
+            self.sync_todos_index(project_id, &todos).await?;
+        }
+
+        let file = atlas_file(&project_path, "milestones");
+        let mut all: Vec<Milestone> = read_json(&file)?.unwrap_or_default();
+        let before = all.len();
+        all.retain(|m| m.id != milestone_id);
+        let removed = all.len() != before;
+        if removed {
+            write_json(&file, &all)?;
+        }
+        Ok(removed)
+    }
+
+    /// Read the todos that currently claim `milestone_id` via their
+    /// `milestone_id` field. Used by the score-recompute path and by
+    /// the milestone detail UI.
+    pub async fn milestone_member_todos(
+        &self,
+        project_id: &str,
+        milestone_id: &str,
+    ) -> anyhow::Result<Vec<Todo>> {
+        let todos = self.todos_list(project_id).await?;
+        Ok(todos
+            .into_iter()
+            .filter(|t| t.milestone_id.as_deref() == Some(milestone_id))
+            .collect())
     }
 
     // =================================================================
@@ -2658,6 +2748,14 @@ mod tests {
             text: text.into(),
             due: None,
             created_at: chrono::Utc::now().to_rfc3339(),
+            project_id: None,
+            milestone_id: None,
+            routine_instance_id: None,
+            priority: None,
+            deadline: None,
+            estimate: None,
+            pinned_today: None,
+            done_at: None,
         }
     }
 
@@ -3229,6 +3327,84 @@ mod tests {
             err.is_err(),
             "unknown project must error, not silently no-op"
         );
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------
+    // Milestones — P2 schema. CRUD + delete-orphan + member lookup.
+    // Score recompute is exercised in the `commands::milestones` flow,
+    // not here; here we confirm persistence is stable.
+
+    fn mk_milestone(id: &str, project_id: &str, deadline: &str) -> Milestone {
+        use crate::storage::types::{MilestoneStatus, Priority};
+        Milestone {
+            id: id.into(),
+            project_id: project_id.into(),
+            title: format!("milestone-{id}"),
+            description: None,
+            deadline: deadline.into(),
+            original_deadline: deadline.into(),
+            status: MilestoneStatus::Active,
+            priority: Priority::P2,
+            order: 0,
+            todo_ids: Vec::new(),
+            extensions: Vec::new(),
+            success_points: 0.0,
+            failing_points: 0.0,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            done_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn milestones_upsert_list_and_delete_orphans_member_todos() -> anyhow::Result<()> {
+        let db = Db::open_in_memory().await?;
+        let (pid, project_path) = make_real_project(&db, "milestones-rt").await?;
+
+        // Empty initially.
+        assert!(db.milestones_list(&pid).await?.is_empty());
+
+        // Insert two.
+        let m1 = mk_milestone("m1", &pid, "2026-06-01");
+        let m2 = mk_milestone("m2", &pid, "2026-07-01");
+        db.milestones_upsert(&pid, &m1).await?;
+        db.milestones_upsert(&pid, &m2).await?;
+        let listed = db.milestones_list(&pid).await?;
+        assert_eq!(listed.len(), 2);
+        assert!(project_path.join(".atlas/milestones.json").exists());
+
+        // Update preserves position.
+        let mut m1b = m1.clone();
+        m1b.title = "updated".into();
+        db.milestones_upsert(&pid, &m1b).await?;
+        let listed = db.milestones_list(&pid).await?;
+        assert_eq!(listed[0].title, "updated");
+        assert_eq!(listed.len(), 2);
+
+        // Attach a todo to m1 by setting its milestone_id.
+        let mut t = mk_todo("t1", "task in m1", false);
+        t.milestone_id = Some("m1".into());
+        db.todos_upsert(&pid, &t).await?;
+        let members = db.milestone_member_todos(&pid, "m1").await?;
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].id, "t1");
+
+        // Delete m1 → returns true, removes it, and orphans the todo.
+        let removed = db.milestones_delete(&pid, "m1").await?;
+        assert!(removed);
+        assert_eq!(db.milestones_list(&pid).await?.len(), 1);
+        let todos = db.todos_list(&pid).await?;
+        let orphan = todos.iter().find(|t| t.id == "t1").unwrap();
+        assert!(
+            orphan.milestone_id.is_none(),
+            "deleted milestone must orphan its member todos back to project root"
+        );
+
+        // Delete missing → returns false, no error.
+        let removed = db.milestones_delete(&pid, "does-not-exist").await?;
+        assert!(!removed);
+
+        std::fs::remove_dir_all(project_path.parent().unwrap()).ok();
         Ok(())
     }
 }

@@ -17,6 +17,8 @@ export type InspectorTab =
   | "sessions"
   | "scripts"
   | "todos"
+  | "milestones"
+  | "routines"
   | "notes"
   | "disk";
 
@@ -84,6 +86,8 @@ export interface UiState {
   newProjectOpen: null | { tab: "new" | "clone" | "import" };
   settingsOpen: null | { section: SettingsSection };
   contextMenu: null | { x: number; y: number; projectId: string };
+  todayOpen: boolean;
+  timelineOpen: boolean;
 
   // -  when not null, the project row with this id renders an inline
   renamingProjectId: string | null;
@@ -122,6 +126,8 @@ export interface UiState {
   openContextMenu: (m: { x: number; y: number; projectId: string }) => void;
   closeContextMenu: () => void;
   setRenamingProjectId: (id: string | null) => void;
+  setTodayOpen: (open: boolean) => void;
+  setTimelineOpen: (open: boolean) => void;
 
   // Enter multi-select with `ids` pre-seeded (usually the row the user
   startMultiSelect: (ids: string[]) => void;
@@ -172,6 +178,8 @@ export const useUiStore = create<UiState>((set) => ({
   contextMenu: null,
   renamingProjectId: null,
   multiSelect: { active: false, ids: [] },
+  todayOpen: false,
+  timelineOpen: false,
 
   setTheme: (theme) => set({ theme }),
   setTerminalTheme: (terminalTheme) => set({ terminalTheme }),
@@ -222,6 +230,8 @@ export const useUiStore = create<UiState>((set) => ({
   openContextMenu: (m) => set({ contextMenu: m }),
   closeContextMenu: () => set({ contextMenu: null }),
   setRenamingProjectId: (renamingProjectId) => set({ renamingProjectId }),
+  setTodayOpen: (todayOpen) => set({ todayOpen }),
+  setTimelineOpen: (timelineOpen) => set({ timelineOpen }),
 
   startMultiSelect: (ids) =>
     set((s) => {

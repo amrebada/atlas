@@ -1,5 +1,7 @@
 import { Icon, Kbd } from "./Icon";
 import type { Project } from "../types";
+import { TodayBadge } from "../features/planner/TodayPanel";
+import { useUiStore } from "../state/store";
 
 interface TitleBarProps {
   project: Project | null;
@@ -15,6 +17,7 @@ export function TitleBar({
   onNew,
   onSettings,
 }: TitleBarProps) {
+  const setTimelineOpen = useUiStore((s) => s.setTimelineOpen);
   return (
     <div
       data-tauri-drag-region
@@ -33,6 +36,20 @@ export function TitleBar({
       </div>
 
       <div data-tauri-drag-region className="flex-1" />
+
+      {/* Today affordance — count of must-do items, or a checkmark when
+          the day is clear. ⌘T opens the full view. */}
+      <TodayBadge />
+
+      <button
+        data-tauri-drag-region="false"
+        onClick={() => setTimelineOpen(true)}
+        title="Timeline (⌘⇧T)"
+        aria-label="Open timeline"
+        className="w-6 h-6 bg-transparent border border-line rounded-[5px] text-text-dim inline-flex items-center justify-center hover:text-text shrink-0"
+      >
+        <Icon name="grid" size={12} />
+      </button>
 
       {/* ⌘K pseudo-input — non-dragging so clicks reach the button. */}
       <button

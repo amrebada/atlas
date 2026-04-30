@@ -21,6 +21,10 @@ export function useGlobalShortcuts(): void {
   const multiSelect = useUiStore((s) => s.multiSelect);
   const startMultiSelect = useUiStore((s) => s.startMultiSelect);
   const clearMultiSelect = useUiStore((s) => s.clearMultiSelect);
+  const todayOpen = useUiStore((s) => s.todayOpen);
+  const setTodayOpen = useUiStore((s) => s.setTodayOpen);
+  const timelineOpen = useUiStore((s) => s.timelineOpen);
+  const setTimelineOpen = useUiStore((s) => s.setTimelineOpen);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -31,6 +35,16 @@ export function useGlobalShortcuts(): void {
       if (key === "escape") {
         if (paletteOpen) {
           setPaletteOpen(false);
+          e.preventDefault();
+          return;
+        }
+        if (timelineOpen) {
+          setTimelineOpen(false);
+          e.preventDefault();
+          return;
+        }
+        if (todayOpen) {
+          setTodayOpen(false);
           e.preventDefault();
           return;
         }
@@ -79,6 +93,15 @@ export function useGlobalShortcuts(): void {
         setPaletteOpen(!paletteOpen);
         return;
       }
+      if (key === "t") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          setTimelineOpen(!timelineOpen);
+        } else {
+          setTodayOpen(!todayOpen);
+        }
+        return;
+      }
       if (key === "n") {
         e.preventDefault();
         openNewProject(e.shiftKey ? "clone" : "new");
@@ -121,5 +144,9 @@ export function useGlobalShortcuts(): void {
     multiSelect.active,
     startMultiSelect,
     clearMultiSelect,
+    todayOpen,
+    setTodayOpen,
+    timelineOpen,
+    setTimelineOpen,
   ]);
 }
