@@ -70,7 +70,7 @@ pub async fn refresh_all(ctx: &AppContext) -> anyhow::Result<()> {
             indexes.iter().map(|&i| instances[i].clone()).collect();
         let res = apply_overdue(routine, &mut owned, now);
         if !res.newly_missed.is_empty() {
-            for (slot, original) in indexes.iter().zip(owned.into_iter()) {
+            for (slot, original) in indexes.iter().zip(owned) {
                 instances[*slot] = original;
             }
             any_change = true;

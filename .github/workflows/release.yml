@@ -18,23 +18,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Apple Silicon — native build on M-series runner.
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
             rust-target: aarch64-apple-darwin
-          # Intel macs — cross-compiled from M-series runner. Avoids
-          # GitHub's throttled `macos-13` queue (Intel runners are
-          # being deprecated). Apple Silicon → x86_64-apple-darwin
-          # is a first-class Rust target; tauri build supports it.
+            updater-key: darwin-aarch64
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
             rust-target: x86_64-apple-darwin
+            updater-key: darwin-x86_64
           - platform: ubuntu-22.04
             args: ""
             rust-target: ""
+            updater-key: linux-x86_64
           - platform: windows-latest
             args: ""
             rust-target: ""
+            updater-key: windows-x86_64
 
     runs-on: ${{ matrix.platform }}
 
@@ -59,8 +58,6 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
-          # Per-arch macOS builds need separate caches so they don't
-          # clobber each other on shared runners.
           key: ${{ matrix.platform }}-${{ matrix.rust-target }}
 
       - name: Install Linux build dependencies
@@ -79,22 +76,18 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build and upload Tauri bundle
-        # Pinned. The floating `@v0` had a bug where the macOS
-        # `.app.tar.gz.sig` got orphaned because the action re-tarred
-        # `.app` into a freshly-named bundle. Pin to a recent release
-        # that uses the existing tarball + sig pair.
-        uses: tauri-apps/tauri-action@action-v0.5.21
+      - name: Build and (best-effort) upload Tauri bundle
+        # @v0 is the floating tag — it'll create the release and upload
+        # the user-facing bundles (.dmg, .deb, .msi, etc). We don't
+        # rely on it for `.sig` files or `latest.json` — those are
+        # handled by the next two steps.
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          # Tauri update keypair — REQUIRED for auto-update.
-          # Without these, tauri-action skips the .sig + latest.json
-          # artefacts and the updater URL stays 404.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-          # macOS Developer ID + notarisation.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -102,25 +95,153 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-          # No Windows code signing — Authenticode is intentionally not
-          # configured. Auto-update still works; SmartScreen warns once
-          # per install.
-
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Atlas ${{ github.ref_name }}"
           releaseBody: "See CHANGELOG.md for release notes."
-          # Publish immediately so `releases/latest/download/latest.json`
-          # resolves without manual intervention.
           releaseDraft: false
           prerelease: false
-          # Make tauri-action upload the `.nsis.zip` updater bundle
-          # alongside the `.msi` on Windows. Without this it only
-          # uploads the `.msi` and the Windows entry is missing from
-          # `latest.json`.
-          updaterJsonPreferNsis: true
-          # Keep the per-arch entries on macOS so the manifest emits
-          # `darwin-aarch64` + `darwin-x86_64` keys (matching what
-          # `plugin-updater` looks up at runtime).
-          updaterJsonKeepUniversal: false
           args: ${{ matrix.args }}
+
+      - name: Locate updater bundle + signature
+        id: updater
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The updater plugin emits `<bundle>` + `<bundle>.sig` per
+          # platform. We pick the first match and emit them as outputs
+          # for the next step.
+          case "${{ matrix.updater-key }}" in
+            darwin-*)
+              SEARCH_DIR="src-tauri/target/${{ matrix.rust-target }}/release/bundle/macos"
+              PATTERN="*.app.tar.gz"
+              ;;
+            linux-*)
+              SEARCH_DIR="src-tauri/target/release/bundle/appimage"
+              PATTERN="*.AppImage.tar.gz"
+              ;;
+            windows-*)
+              SEARCH_DIR="src-tauri/target/release/bundle/nsis"
+              PATTERN="*-setup.nsis.zip"
+              ;;
+          esac
+
+          if [ ! -d "$SEARCH_DIR" ]; then
+            echo "::warning::No bundle dir at $SEARCH_DIR — skipping"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `find` so this works on Windows runners too (no `ls` glob).
+          BUNDLE=$(find "$SEARCH_DIR" -maxdepth 1 -name "$PATTERN" ! -name "*.sig" | head -n 1)
+          if [ -z "$BUNDLE" ] || [ ! -f "$BUNDLE" ]; then
+            echo "::warning::No updater bundle matching $PATTERN in $SEARCH_DIR"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          SIG="${BUNDLE}.sig"
+          if [ ! -f "$SIG" ]; then
+            echo "::warning::No signature next to $BUNDLE"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Stable upload name keyed on platform so each run overwrites
+          # the previous one cleanly.
+          BASENAME=$(basename "$BUNDLE")
+          UPLOAD_NAME="${{ matrix.updater-key }}-$BASENAME"
+
+          # Stage the file in $RUNNER_TEMP under the upload name so the
+          # remote asset name matches.
+          STAGED_BUNDLE="$RUNNER_TEMP/$UPLOAD_NAME"
+          STAGED_SIG="$RUNNER_TEMP/$UPLOAD_NAME.sig"
+          cp "$BUNDLE" "$STAGED_BUNDLE"
+          cp "$SIG" "$STAGED_SIG"
+
+          {
+            echo "found=true"
+            echo "platform=${{ matrix.updater-key }}"
+            echo "bundle=$STAGED_BUNDLE"
+            echo "sig=$STAGED_SIG"
+            echo "name=$UPLOAD_NAME"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload updater bundle + signature
+        if: steps.updater.outputs.found == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ github.ref_name }}" \
+            "${{ steps.updater.outputs.bundle }}" \
+            "${{ steps.updater.outputs.sig }}" \
+            --clobber \
+            --repo "${{ github.repository }}"
+
+  manifest:
+    name: Build & upload latest.json
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Assemble manifest
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          WORK=$(mktemp -d)
+          cd "$WORK"
+
+          # Pull every .sig the build jobs uploaded.
+          gh release download "$TAG" --repo "$REPO" --pattern "*.sig"
+
+          VERSION="${TAG#v}"
+          PUBDATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          # Build a `platforms` object by pairing each known sig with
+          # its bundle URL. Missing platforms are simply omitted —
+          # that's safer than emitting an entry with a blank signature.
+          PLATFORMS_JSON="{}"
+          for KEY in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
+            SIG_FILE=$(ls "${KEY}-"*.sig 2>/dev/null | head -n 1 || true)
+            if [ -z "$SIG_FILE" ]; then
+              echo "no sig for $KEY — skipping"
+              continue
+            fi
+            BUNDLE_NAME="${SIG_FILE%.sig}"
+            URL="https://github.com/$REPO/releases/download/$TAG/$BUNDLE_NAME"
+            SIG=$(cat "$SIG_FILE")
+
+            PLATFORMS_JSON=$(jq \
+              --arg key "$KEY" \
+              --arg sig "$SIG" \
+              --arg url "$URL" \
+              '. + {($key): {signature: $sig, url: $url}}' \
+              <<<"$PLATFORMS_JSON")
+          done
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$PUBDATE" \
+            --argjson platforms "$PLATFORMS_JSON" \
+            '{
+              version: $version,
+              notes: "See CHANGELOG.md",
+              pub_date: $pub_date,
+              platforms: $platforms
+            }' > latest.json
+
+          cat latest.json
+
+          gh release upload "$TAG" latest.json \
+            --clobber \
+            --repo "$REPO"
