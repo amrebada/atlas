@@ -60,13 +60,13 @@ jobs:
             rust-target: ""
             updater-key: linux-x86_64
             bundle-dir: src-tauri/target/release/bundle/appimage
-            bundle-pattern: "*.AppImage.tar.gz"
+            bundle-pattern: "*.AppImage"
           - platform: windows-latest
             args: ""
             rust-target: ""
             updater-key: windows-x86_64
             bundle-dir: src-tauri/target/release/bundle/nsis
-            bundle-pattern: "*-setup.nsis.zip"
+            bundle-pattern: "*-setup.exe"
 
     runs-on: ${{ matrix.platform }}
 
