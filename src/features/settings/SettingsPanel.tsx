@@ -5,7 +5,10 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { getVersion } from "@tauri-apps/api/app";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { Icon } from "../../components/Icon";
 import atlasIconUrl from "../../assets/atlas-icon.png";
 import {
@@ -1070,6 +1073,9 @@ function AboutSection() {
         </div>
       </div>
 
+      <SectionHdr>Version</SectionHdr>
+      <UpdateChecker />
+
       <SectionHdr>Author</SectionHdr>
       <SettingsRow label="Name">
         <span style={{ fontSize: 13 }}>{AUTHOR.name}</span>
@@ -1086,6 +1092,116 @@ function AboutSection() {
         <ExternalLink href={AUTHOR.linkedin}>{AUTHOR.linkedin}</ExternalLink>
       </SettingsRow>
     </div>
+  );
+}
+
+type UpdateState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "up_to_date" }
+  | { kind: "available"; version: string; notes?: string }
+  | { kind: "downloading"; version: string }
+  | { kind: "ready"; version: string }
+  | { kind: "error"; message: string };
+
+// Manual update check — shows the running version and lets the user
+// trigger a check on demand. Useful for verifying an update flows from
+// `latest.json` end-to-end without waiting for the once-per-launch hook.
+function UpdateChecker() {
+  const pushToast = useUiStore((s) => s.pushToast);
+  const [version, setVersion] = useState<string>("…");
+  const [state, setState] = useState<UpdateState>({ kind: "idle" });
+
+  useEffect(() => {
+    getVersion()
+      .then(setVersion)
+      .catch(() => setVersion("unknown"));
+  }, []);
+
+  const onCheck = async () => {
+    setState({ kind: "checking" });
+    try {
+      const update = await checkForUpdate();
+      if (!update) {
+        setState({ kind: "up_to_date" });
+        return;
+      }
+      setState({
+        kind: "available",
+        version: update.version,
+        notes: update.body ?? undefined,
+      });
+      // Begin downloading immediately so the user can verify install +
+      // restart in one click cycle.
+      setState({ kind: "downloading", version: update.version });
+      await update.downloadAndInstall();
+      setState({ kind: "ready", version: update.version });
+      pushToast(
+        "success",
+        `Atlas ${update.version} installed — restarting…`,
+        2_500,
+      );
+      setTimeout(() => {
+        void relaunch();
+      }, 1_500);
+    } catch (err) {
+      const message = String(err);
+      setState({ kind: "error", message });
+      pushToast("error", `Update check failed: ${message}`);
+    }
+  };
+
+  const busy = state.kind === "checking" || state.kind === "downloading";
+
+  return (
+    <>
+      <SettingsRow label="Current version">
+        <code style={CODE_STYLE}>{version}</code>
+      </SettingsRow>
+      <SettingsRow
+        label="Check for updates"
+        hint="Pulls the latest manifest and installs if a newer build is available."
+      >
+        <button
+          onClick={onCheck}
+          disabled={busy}
+          style={{
+            ...PRIMARY_BTN,
+            opacity: busy ? 0.6 : 1,
+            cursor: busy ? "default" : "pointer",
+          }}
+        >
+          {state.kind === "checking" && "Checking…"}
+          {state.kind === "downloading" && "Downloading…"}
+          {state.kind !== "checking" && state.kind !== "downloading" &&
+            "Check now"}
+        </button>
+      </SettingsRow>
+      {state.kind !== "idle" && (
+        <div
+          style={{
+            fontSize: 11,
+            fontFamily: "var(--mono)",
+            color:
+              state.kind === "error"
+                ? "var(--danger)"
+                : state.kind === "up_to_date"
+                  ? "var(--text-dim)"
+                  : "var(--accent)",
+            padding: "8px 0 14px",
+          }}
+        >
+          {state.kind === "up_to_date" && "You're on the latest version."}
+          {state.kind === "available" &&
+            `Update ${state.version} available — preparing install…`}
+          {state.kind === "downloading" &&
+            `Downloading ${state.version}…`}
+          {state.kind === "ready" &&
+            `Atlas ${state.version} installed — restarting.`}
+          {state.kind === "error" && state.message}
+        </div>
+      )}
+    </>
   );
 }
 
