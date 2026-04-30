@@ -196,11 +196,7 @@ pub fn expand(
             // Walk the recurrence from `start` until we pass `hi` or hit a bound.
             let mut idx: u32 = 0;
             let mut emitted: u32 = 0;
-            loop {
-                let d = match start.checked_add_days(Days::new((idx as i64 * step) as u64)) {
-                    Some(v) => v,
-                    None => break,
-                };
+            while let Some(d) = start.checked_add_days(Days::new((idx as i64 * step) as u64)) {
                 if d > hi {
                     break;
                 }

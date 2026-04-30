@@ -60,6 +60,7 @@ pub async fn milestones_create(
 /// Update mutable milestone fields. Preserves `original_deadline`,
 /// `extensions`, and the score caches.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn milestones_update(
     app: AppHandle,
     state: tauri::State<'_, Db>,

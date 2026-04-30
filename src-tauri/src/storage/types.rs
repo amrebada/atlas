@@ -623,7 +623,7 @@ pub struct DiscoveryResult {
 
 /// Importance bucket for todos, milestones, and routines. Drives the
 /// scoring weights in `score_engine` (P0=2× / P1=1.5× / P2=1× / P3=0.5×).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "lowercase")]
 #[ts(
     export,
@@ -633,14 +633,9 @@ pub struct DiscoveryResult {
 pub enum Priority {
     P0,
     P1,
+    #[default]
     P2,
     P3,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Self::P2
-    }
 }
 
 impl Priority {

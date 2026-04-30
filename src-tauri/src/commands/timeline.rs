@@ -4,7 +4,7 @@
 
 #![allow(dead_code, unused_variables)]
 
-use chrono::{Days, NaiveDate, Utc};
+use chrono::{Days, Utc};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use ts_rs::TS;

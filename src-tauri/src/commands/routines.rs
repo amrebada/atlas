@@ -145,6 +145,7 @@ pub async fn routines_create(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn routines_update(
     app: AppHandle,
     ctx: tauri::State<'_, AppContext>,

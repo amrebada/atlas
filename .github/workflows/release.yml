@@ -18,12 +18,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Apple Silicon — runs on macos-latest (M-series runner).
+          # Apple Silicon — native build on M-series runner.
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
             rust-target: aarch64-apple-darwin
-          # Intel macs — pinned to macos-13 (last Intel runner).
-          - platform: macos-13
+          # Intel macs — cross-compiled from M-series runner. Avoids
+          # GitHub's throttled `macos-13` queue (Intel runners are
+          # being deprecated). Apple Silicon → x86_64-apple-darwin
+          # is a first-class Rust target; tauri build supports it.
+          - platform: macos-latest
             args: "--target x86_64-apple-darwin"
             rust-target: x86_64-apple-darwin
           - platform: ubuntu-22.04
@@ -77,7 +80,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build and upload Tauri bundle
-        uses: tauri-apps/tauri-action@v0
+        # Pinned. The floating `@v0` had a bug where the macOS
+        # `.app.tar.gz.sig` got orphaned because the action re-tarred
+        # `.app` into a freshly-named bundle. Pin to a recent release
+        # that uses the existing tarball + sig pair.
+        uses: tauri-apps/tauri-action@action-v0.5.21
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

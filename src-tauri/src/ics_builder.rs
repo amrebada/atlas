@@ -128,7 +128,7 @@ pub fn build_routine_event(routine: &Routine, project_name: Option<&str>) -> Opt
             if let Goal::Count { target, .. } = &routine.goal {
                 if let Some(cad) = crate::routine_engine::cadence_days_estimate(routine) {
                     if let Ok(start) = NaiveDate::parse_from_str(&routine.start_date, "%Y-%m-%d") {
-                        let total_days = (cad as i64) * (*target as i64);
+                        let total_days = (cad as i64) * *target;
                         if let Some(end) =
                             start.checked_add_days(chrono::Days::new(total_days as u64))
                         {
