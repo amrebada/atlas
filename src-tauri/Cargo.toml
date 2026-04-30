@@ -99,6 +99,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 # TS type generation (D1 uses this)
 ts-rs = "10"
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
 
 [dev-dependencies]
 tempfile = "3"

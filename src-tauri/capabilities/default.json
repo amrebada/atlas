@@ -12,6 +12,8 @@
     "dialog:default",
     "fs:default",
     "shell:default",
-    "autostart:default"
+    "autostart:default",
+    "updater:default",
+    "process:default"
   ]
 }

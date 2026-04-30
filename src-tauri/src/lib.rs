@@ -58,6 +58,11 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        // Auto-update — verifies bundles against the public key baked
+        // into `tauri.conf.json`, downloads in-place, and lets the JS
+        // side trigger a relaunch via `plugin-process`.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // Open SQLite index at $APP_DATA/atlas/atlas.db and hand it to
         .setup(|app| {
             let app_data = app

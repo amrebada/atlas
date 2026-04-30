@@ -69,10 +69,35 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # Tauri update keypair — REQUIRED for auto-update.
+          # Without these, tauri-action skips the .sig + latest.json
+          # artefacts and the updater URL stays 404.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+          # macOS Developer ID + notarisation. Optional — without these
+          # macOS users get "unidentified developer" warnings on every
+          # auto-update, but the update still applies.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+          # No Windows code signing — Authenticode is intentionally not
+          # configured. Windows users will see SmartScreen / "unknown
+          # publisher" warnings on install. Auto-update still works
+          # via the Tauri signature alone.
+
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Atlas ${{ github.ref_name }}"
           releaseBody: "See CHANGELOG.md for release notes."
-          releaseDraft: true
+          # Publish immediately so `releases/latest/download/latest.json`
+          # resolves without manual intervention. Drafts don't satisfy
+          # `/releases/latest`.
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

@@ -18,6 +18,7 @@ import { TerminalStrip } from "./features/terminal/TerminalStrip";
 import { TodayView } from "./features/planner/TodayView";
 import { TimelineView } from "./features/planner/TimelineView";
 import { useTopPriorityNotification } from "./features/planner/useTopPriorityNotification";
+import { useAutoUpdate } from "./features/updater/useAutoUpdate";
 import { useTerminalStore } from "./features/terminal/layout";
 import { getSettings, listProjects, listWatchers } from "./ipc";
 import type { Settings } from "./types";
@@ -76,6 +77,9 @@ function AppInner() {
   // Planner — fire the headline notification on first session of the
   // local day, and listen for backend-pushed planner events.
   useTopPriorityNotification();
+
+  // Auto-update — checks the GitHub Releases manifest once at launch.
+  useAutoUpdate();
 
   // Hydrate the Zustand UI store from persisted settings. The store is
   const setTheme = useUiStore((s) => s.setTheme);
