@@ -3,8 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use git2::{ErrorClass, ErrorCode, Repository};
 use ignore::WalkBuilder;
+use serde::{Deserialize, Serialize};
 use tauri::State;
+use ts_rs::TS;
 
 use crate::git;
 use crate::storage::types::{FileKind, FileNode};
@@ -24,6 +27,31 @@ const DENY_DIRS: &[&str] = &[
 ];
 
 const DEFAULT_DEPTH: usize = 4;
+
+/// Diff payload used by the Inspector → Files tab when the user clicks a
+/// changed file. We hand the renderer two raw strings and let the JS diff
+/// viewer compute the visual diff.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct FileDiff {
+    /// Path relative to the project root.
+    pub path: String,
+    /// Status char, mirroring `git::FileStatus::status` (`M`/`+`/`-`).
+    pub status: String,
+    /// File contents at HEAD. Empty string when the file is newly added.
+    pub old_content: String,
+    /// File contents in the working tree. Empty string when the file is
+    /// deleted.
+    pub new_content: String,
+    /// True when either side looks binary (NUL byte in the first 8 KB).
+    /// The UI uses this to hide the diff viewer and show a fallback note.
+    pub is_binary: bool,
+}
 
 /// `files.list` - return either the changed-files tree or the full project
 #[tauri::command]
@@ -203,6 +231,117 @@ fn full_tree(project_path: &Path, max_depth: usize) -> anyhow::Result<Vec<FileNo
     Ok(nodes)
 }
 
+/// `files.diff` - return the HEAD vs working-tree contents of a single file
+/// in the project so the renderer can show a side-by-side / inline diff.
+#[tauri::command]
+pub async fn files_diff(
+    state: State<'_, Db>,
+    project_id: String,
+    path: String,
+) -> Result<FileDiff, String> {
+    let project = state
+        .get_project(&project_id)
+        .await
+        .map_err(|e: anyhow::Error| e.to_string())?
+        .ok_or_else(|| format!("project not found: {project_id}"))?;
+    let project_path = PathBuf::from(&project.path);
+
+    tauri::async_runtime::spawn_blocking(move || read_file_diff(&project_path, &path))
+        .await
+        .map_err(|e| format!("join blocking: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
+/// Build a [`FileDiff`] for a single relative path inside the repo. The
+/// HEAD blob is read via libgit2; the working-tree side is read straight
+/// from disk so untracked files surface naturally.
+fn read_file_diff(project_path: &Path, rel_path: &str) -> anyhow::Result<FileDiff> {
+    let rel = Path::new(rel_path);
+    if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        anyhow::bail!("invalid path: {rel_path}");
+    }
+
+    // ---- HEAD content ------------------------------------------------------
+    let (old_content, head_existed) = match Repository::open(project_path) {
+        Ok(repo) => match read_head_blob(&repo, rel_path) {
+            Ok(Some(bytes)) => (bytes, true),
+            Ok(None) => (Vec::new(), false),
+            Err(_) => (Vec::new(), false),
+        },
+        Err(e) if e.code() == ErrorCode::NotFound && e.class() == ErrorClass::Repository => {
+            (Vec::new(), false)
+        }
+        Err(_) => (Vec::new(), false),
+    };
+
+    // ---- working-tree content ---------------------------------------------
+    let abs = project_path.join(rel);
+    let (new_content, wt_existed) = match std::fs::read(&abs) {
+        Ok(bytes) => (bytes, true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (Vec::new(), false),
+        Err(err) => anyhow::bail!("read {rel_path}: {err}"),
+    };
+
+    let status = if head_existed && !wt_existed {
+        "-"
+    } else if !head_existed && wt_existed {
+        "+"
+    } else {
+        "M"
+    };
+
+    let is_binary = looks_binary(&old_content) || looks_binary(&new_content);
+
+    Ok(FileDiff {
+        path: rel_path.to_string(),
+        status: status.to_string(),
+        old_content: if is_binary {
+            String::new()
+        } else {
+            String::from_utf8_lossy(&old_content).into_owned()
+        },
+        new_content: if is_binary {
+            String::new()
+        } else {
+            String::from_utf8_lossy(&new_content).into_owned()
+        },
+        is_binary,
+    })
+}
+
+/// Read the blob bytes for `rel_path` at the current `HEAD` commit. Returns
+/// `Ok(None)` when the file does not exist in the HEAD tree (newly added)
+/// or the repo is unborn.
+fn read_head_blob(repo: &Repository, rel_path: &str) -> anyhow::Result<Option<Vec<u8>>> {
+    let head = match repo.head() {
+        Ok(h) => h,
+        // Unborn branch (fresh repo) → no HEAD blob yet.
+        Err(e) if e.code() == ErrorCode::UnbornBranch || e.code() == ErrorCode::NotFound => {
+            return Ok(None);
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let tree = head.peel_to_commit()?.tree()?;
+    let entry = match tree.get_path(Path::new(rel_path)) {
+        Ok(e) => e,
+        Err(e) if e.code() == ErrorCode::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let object = entry.to_object(repo)?;
+    let blob = match object.into_blob() {
+        Ok(b) => b,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(blob.content().to_vec()))
+}
+
+/// Heuristic: a file is binary if any of the first 8 KB is a NUL byte.
+/// Matches the rule git itself uses for diff fallback messaging.
+fn looks_binary(bytes: &[u8]) -> bool {
+    let cap = bytes.len().min(8192);
+    bytes[..cap].contains(&0u8)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +352,12 @@ mod tests {
         assert_eq!(format_delta(3, 0), "+3");
         assert_eq!(format_delta(0, 5), "−5");
         assert_eq!(format_delta(2, 7), "+2 −7");
+    }
+
+    #[test]
+    fn looks_binary_detects_nul() {
+        assert!(!looks_binary(b"hello world\n"));
+        assert!(looks_binary(b"hello\0world"));
+        assert!(!looks_binary(b""));
     }
 }

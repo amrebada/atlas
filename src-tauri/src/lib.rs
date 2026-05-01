@@ -178,6 +178,7 @@ pub fn run() {
             commands::scripts::scripts_run,
             commands::scripts::scripts_run_with_env,
             commands::files::files_list,
+            commands::files::files_diff,
             commands::todos::todos_list,
             commands::todos::todos_upsert,
             commands::todos::todos_delete,

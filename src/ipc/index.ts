@@ -366,6 +366,20 @@ export const icsRevealDir = () => invoke<void>("ics_reveal_dir");
 export const listFiles = (projectId: string, changedOnly: boolean) =>
   invoke<FileNode[]>("files_list", { projectId, changedOnly });
 
+// Per-file diff: HEAD vs working tree as raw strings. Consumed by the
+// Inspector → Files diff modal, which feeds the strings into a JS diff
+// viewer (split / inline view).
+export interface FileDiff {
+  path: string;
+  status: string;
+  oldContent: string;
+  newContent: string;
+  isBinary: boolean;
+}
+
+export const filesDiff = (projectId: string, path: string) =>
+  invoke<FileDiff>("files_diff", { projectId, path });
+
 
 // `.atlas/notes/<id>.json` round-trip wrappers. Names match D4's planned
 

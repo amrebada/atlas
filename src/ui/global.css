@@ -312,3 +312,48 @@
   height: 0;
   pointer-events: none;
 }
+
+/* Light-mode overrides for the Prism Darcula theme used in the diff modal.
+   Darcula's default token color is `#a9b7c6` which is invisible on a light
+   background; remap the most-used tokens to readable counterparts. */
+[data-theme="light"] .diff-syntax,
+[data-theme="light"] .diff-syntax .token {
+  color: var(--text);
+}
+[data-theme="light"] .diff-syntax .token.keyword,
+[data-theme="light"] .diff-syntax .token.atrule,
+[data-theme="light"] .diff-syntax .token.selector,
+[data-theme="light"] .diff-syntax .token.important,
+[data-theme="light"] .diff-syntax .token.boolean {
+  color: #b03a2e;
+  font-weight: 600;
+}
+[data-theme="light"] .diff-syntax .token.string,
+[data-theme="light"] .diff-syntax .token.char,
+[data-theme="light"] .diff-syntax .token.attr-value,
+[data-theme="light"] .diff-syntax .token.regex {
+  color: #1d7a3c;
+}
+[data-theme="light"] .diff-syntax .token.comment,
+[data-theme="light"] .diff-syntax .token.prolog,
+[data-theme="light"] .diff-syntax .token.cdata {
+  color: #6b7785;
+  font-style: italic;
+}
+[data-theme="light"] .diff-syntax .token.function,
+[data-theme="light"] .diff-syntax .token.class-name {
+  color: #7d3c98;
+}
+[data-theme="light"] .diff-syntax .token.number,
+[data-theme="light"] .diff-syntax .token.constant,
+[data-theme="light"] .diff-syntax .token.symbol {
+  color: #2c5fb3;
+}
+[data-theme="light"] .diff-syntax .token.tag,
+[data-theme="light"] .diff-syntax .token.attr-name {
+  color: #b03a2e;
+}
+[data-theme="light"] .diff-syntax .token.punctuation,
+[data-theme="light"] .diff-syntax .token.operator {
+  color: #5b6470;
+}
