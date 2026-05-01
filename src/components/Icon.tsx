@@ -30,6 +30,7 @@ export type IconName =
   | "arrow-up"
   | "arrow-down"
   | "chevron"
+  | "chevron-l"
   | "chevron-d"
   | "dot"
   | "archive"
@@ -258,6 +259,12 @@ export function Icon({
       return (
         <svg {...p}>
           <path d="M6 4l4 4-4 4" />
+        </svg>
+      );
+    case "chevron-l":
+      return (
+        <svg {...p}>
+          <path d="M10 4l-4 4 4 4" />
         </svg>
       );
     case "chevron-d":

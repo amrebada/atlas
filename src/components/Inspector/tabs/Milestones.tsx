@@ -448,6 +448,31 @@ function Detail({
   const [extending, setExtending] = useState(false);
   const [newDeadline, setNewDeadline] = useState("");
   const [showLog, setShowLog] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(milestone?.title ?? "");
+  const [descDraft, setDescDraft] = useState(milestone?.description ?? "");
+
+  useEffect(() => {
+    setTitleDraft(milestone?.title ?? "");
+    setDescDraft(milestone?.description ?? "");
+  }, [milestone?.id, milestone?.title, milestone?.description]);
+
+  const commitTitle = () => {
+    const next = titleDraft.trim();
+    if (!milestone) return;
+    if (next && next !== milestone.title) {
+      onUpdate({ title: next });
+    } else {
+      setTitleDraft(milestone.title);
+    }
+  };
+
+  const commitDescription = () => {
+    if (!milestone) return;
+    const next = descDraft;
+    if (next !== (milestone.description ?? "")) {
+      onUpdate({ description: next });
+    }
+  };
 
   if (!milestone) {
     return (
@@ -483,7 +508,7 @@ function Detail({
           onClick={onBack}
           className="text-text-dim hover:text-text text-[11px] inline-flex items-center gap-1"
         >
-          <Icon name="chevron" size={11} stroke="currentColor" />
+          <Icon name="chevron-l" size={11} stroke="currentColor" />
           back
         </button>
         <span className="flex-1" />
@@ -499,8 +524,18 @@ function Detail({
 
       <div>
         <input
-          value={milestone.title}
-          onChange={(e) => onUpdate({ title: e.target.value })}
+          value={titleDraft}
+          onChange={(e) => setTitleDraft(e.target.value)}
+          onBlur={commitTitle}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              (e.currentTarget as HTMLInputElement).blur();
+            } else if (e.key === "Escape") {
+              setTitleDraft(milestone.title);
+              (e.currentTarget as HTMLInputElement).blur();
+            }
+          }}
           className="w-full bg-transparent border-none outline-none text-[15px] font-semibold focus:border-b focus:border-accent"
         />
         <div className="flex items-center gap-2 mt-1">
@@ -517,15 +552,30 @@ function Detail({
             ))}
           </select>
           <span className="text-text-dimmer text-[10px]">·</span>
-          <span className="font-mono text-[10px] text-text-dim">
-            deadline: {milestone.deadline}
-          </span>
+          <span className="font-mono text-[10px] text-text-dim">deadline:</span>
+          <input
+            type="date"
+            value={extending ? newDeadline : milestone.deadline}
+            onChange={(e) => {
+              setExtending(true);
+              setNewDeadline(e.target.value);
+            }}
+            className="bg-transparent border border-line rounded-[4px] px-[6px] py-[1px] text-[10px] font-mono outline-none focus:border-accent text-text-dim"
+          />
           {milestone.deadline !== milestone.originalDeadline && (
             <span className="font-mono text-[10px] text-warn">
               (was {milestone.originalDeadline})
             </span>
           )}
         </div>
+        <textarea
+          value={descDraft}
+          onChange={(e) => setDescDraft(e.target.value)}
+          onBlur={commitDescription}
+          placeholder="Add a description…"
+          rows={2}
+          className="mt-2 w-full bg-surface-2 border border-line rounded-[5px] px-[8px] py-[5px] text-[12px] outline-none focus:border-accent resize-y"
+        />
       </div>
 
       {/* Stats row */}

@@ -497,6 +497,16 @@ export type TodayItem =
       score: number;
     };
 
+export interface SoonestMilestoneRef {
+  id: MilestoneId;
+  projectId: ProjectId;
+  projectName: string;
+  title: string;
+  deadline: string;
+  priority: Priority;
+  daysLeft: number;
+}
+
 export interface PlannerToday {
   mustDo: TodayItem[];
   couldDo: TodayItem[];
@@ -505,6 +515,11 @@ export interface PlannerToday {
   /** Sum of estimates across must-do items, in minutes. */
   totalEstimateMinutes: number;
   pausedAll: boolean;
+  /** Active milestone whose deadline is closest, across all projects. */
+  soonestMilestone: SoonestMilestoneRef | null;
+  /** Open todos belonging to the soonest milestone — surfaced in Today
+   *  even when they don't have their own deadline. */
+  soonestMilestoneTodos: TodayItem[];
 }
 
 export interface ScoreSummary {

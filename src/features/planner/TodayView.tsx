@@ -178,6 +178,48 @@ export function TodayView() {
               </section>
             )}
 
+            {data.soonestMilestone && data.soonestMilestoneTodos.length > 0 && (
+              <section className="border-b border-line">
+                <div className="px-[18px] py-[6px] flex items-center gap-2 bg-surface-2/30 border-b border-line-soft">
+                  <span className="text-[10px] font-mono uppercase tracking-[0.5px] text-text-dim flex-1">
+                    Closing soon · {data.soonestMilestone.title}
+                  </span>
+                  <span
+                    className="font-mono text-[10px]"
+                    style={{
+                      color:
+                        data.soonestMilestone.daysLeft < 0
+                          ? "var(--err, #ef4444)"
+                          : data.soonestMilestone.daysLeft <= 2
+                            ? "var(--warn, #f59e0b)"
+                            : "var(--text-dim)",
+                    }}
+                    title={`Deadline: ${data.soonestMilestone.deadline}`}
+                  >
+                    {data.soonestMilestone.daysLeft < 0
+                      ? `${-data.soonestMilestone.daysLeft}d overdue`
+                      : data.soonestMilestone.daysLeft === 0
+                        ? "today"
+                        : `${data.soonestMilestone.daysLeft}d left`}
+                  </span>
+                  <span className="font-mono text-[10px] text-text-dim">
+                    {data.soonestMilestoneTodos.length}
+                  </span>
+                </div>
+                <div>
+                  {data.soonestMilestoneTodos.map((item) => (
+                    <TodayItemRow
+                      key={itemKey(item)}
+                      item={item}
+                      onAction={
+                        item.kind === "todo" ? () => completeAction(item) : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
             <Section title="Must do today" count={data.mustDo.length}>
               {data.mustDo.length === 0 ? (
                 <Empty message="Nothing locked in. Clean slate." />

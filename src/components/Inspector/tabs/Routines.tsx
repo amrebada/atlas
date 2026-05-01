@@ -586,7 +586,7 @@ function Detail({
           onClick={onBack}
           className="text-text-dim hover:text-text text-[11px] inline-flex items-center gap-1"
         >
-          <Icon name="chevron" size={11} stroke="currentColor" />
+          <Icon name="chevron-l" size={11} stroke="currentColor" />
           back
         </button>
       </div>

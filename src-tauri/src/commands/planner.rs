@@ -81,6 +81,24 @@ pub enum TodayItem {
     export_to = "../../src/types/rust.ts",
     rename_all = "camelCase"
 )]
+pub struct SoonestMilestoneRef {
+    pub id: MilestoneId,
+    pub project_id: ProjectId,
+    pub project_name: String,
+    pub title: String,
+    pub deadline: String,
+    pub priority: Priority,
+    #[ts(type = "number")]
+    pub days_left: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
 pub struct PlannerToday {
     pub must_do: Vec<TodayItem>,
     pub could_do: Vec<TodayItem>,
@@ -92,6 +110,12 @@ pub struct PlannerToday {
     /// True when the global pause-all flag is set; the UI uses this to
     /// pulse a banner so the user remembers they paused.
     pub paused_all: bool,
+    /// The active milestone whose deadline is closest. None when no
+    /// active milestone exists across all projects.
+    pub soonest_milestone: Option<SoonestMilestoneRef>,
+    /// Open todos belonging to `soonest_milestone`. Surfaces them in
+    /// Today regardless of whether they have their own deadline.
+    pub soonest_milestone_todos: Vec<TodayItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -211,6 +235,8 @@ async fn build_today(db: &Db, ctx: &AppContext) -> anyhow::Result<PlannerToday> 
     // ---- milestone deadlines (today + tomorrow + overdue) ----
     let mut milestone_today_items: Vec<TodayItem> = Vec::new();
     let mut deadlines_tomorrow: Vec<TodayItem> = Vec::new();
+    // Track the active milestone with the soonest parseable deadline.
+    let mut soonest: Option<(NaiveDate, crate::storage::types::Milestone, Project)> = None;
     for p in &projects {
         let milestones = db.milestones_list(&p.id).await.unwrap_or_default();
         for m in milestones {
@@ -222,6 +248,15 @@ async fn build_today(db: &Db, ctx: &AppContext) -> anyhow::Result<PlannerToday> 
             }
             if m.title.trim().is_empty() {
                 continue;
+            }
+            if let Ok(parsed) = NaiveDate::parse_from_str(&m.deadline, "%Y-%m-%d") {
+                let better = match &soonest {
+                    None => true,
+                    Some((cur, _, _)) => parsed < *cur,
+                };
+                if better {
+                    soonest = Some((parsed, m.clone(), p.clone()));
+                }
             }
             let dl = m.deadline.clone();
             // Milestones land on the Today list when overdue OR due today.
@@ -332,6 +367,55 @@ async fn build_today(db: &Db, ctx: &AppContext) -> anyhow::Result<PlannerToday> 
 
     let planner_state = planner_io::load_planner_state(&ctx.app_data_dir).unwrap_or_default();
 
+    // ---- soonest active milestone + its open todos ----
+    let (soonest_milestone, soonest_milestone_todos) = match soonest {
+        Some((dl_date, m, p)) => {
+            let days_left = (dl_date - today).num_days();
+            let todos = db.todos_list(&p.id).await.unwrap_or_default();
+            let mut items: Vec<TodayItem> = Vec::new();
+            for t in todos {
+                if t.done {
+                    continue;
+                }
+                if t.milestone_id.as_deref() != Some(m.id.as_str()) {
+                    continue;
+                }
+                if t.text.trim().is_empty() {
+                    continue;
+                }
+                let deadline = t.deadline.clone();
+                let days_overdue = days_overdue(deadline.as_deref(), today);
+                let priority = t.priority.unwrap_or_default();
+                let score = score_todo(&t, today, days_overdue);
+                items.push(TodayItem::Todo {
+                    id: t.id,
+                    project_id: p.id.clone(),
+                    project_name: p.name.clone(),
+                    text: t.text,
+                    priority,
+                    deadline,
+                    score,
+                    days_overdue,
+                    pinned_today: t.pinned_today.unwrap_or(false),
+                });
+            }
+            items.sort_by(|a, b| score_of(b).total_cmp(&score_of(a)));
+            (
+                Some(SoonestMilestoneRef {
+                    id: m.id,
+                    project_id: p.id,
+                    project_name: p.name,
+                    title: m.title,
+                    deadline: m.deadline,
+                    priority: m.priority,
+                    days_left,
+                }),
+                items,
+            )
+        }
+        None => (None, Vec::new()),
+    };
+
     Ok(PlannerToday {
         must_do,
         could_do,
@@ -339,6 +423,8 @@ async fn build_today(db: &Db, ctx: &AppContext) -> anyhow::Result<PlannerToday> 
         deadlines_tomorrow,
         total_estimate_minutes: total_estimate,
         paused_all: planner_state.paused_all,
+        soonest_milestone,
+        soonest_milestone_todos,
     })
 }
 
