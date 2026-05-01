@@ -36,9 +36,9 @@ export function TodayBadge() {
       : paused
         ? "Today · paused"
         : mustCount > 0
-          ? `★ ${mustCount}`
+          ? `${mustCount}`
           : tomorrowCount > 0
-            ? `▲ ${tomorrowCount}`
+            ? `${tomorrowCount}`
             : "Today";
 
   const tone =
@@ -63,7 +63,7 @@ export function TodayBadge() {
       style={{ color: clear ? "var(--text-dim)" : tone }}
     >
       <Icon
-        name={clear ? "check" : "sparkle"}
+        name={clear ? "check" : "clock"}
         size={11}
         stroke={clear ? "var(--accent)" : tone}
       />

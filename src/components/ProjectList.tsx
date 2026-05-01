@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Virtuoso } from "react-virtuoso";
 import { Icon, LangDot } from "./Icon";
@@ -35,13 +35,34 @@ export function ProjectList({
     [multiSelect.ids],
   );
 
+  // Project names must never truncate, so the NAME column's lower bound
+  // is the widest rendered name across all visible projects. We measure
+  // it once per `projects` change with an offscreen probe span so the
+  // measurement honors the active theme's font.
+  const nameMinPx = useNameColumnMin(projects);
+  const nameTrackMin = nameMinPx + 32;
+  const nameTrack = `minmax(${nameTrackMin}px, 1.6fr)`;
+
   // Pass 3 - grid template flips based on whether the AUTHOR column is
   // shown. The SIZE column is wider than it was (was 70px) so that rows
   // with significant on-disk bloat can render both the source size and
   // a compact `+16G` delta without crowding neighbouring columns.
+  // BRANCH is `minmax(110px, 1fr)` so the dirty/ahead/behind badges
+  // (which don't shrink) never overflow into the next column when the
+  // NAME column expands to fit a long project name.
   const gridTemplate = showAuthor
-    ? "24px 1.6fr 1fr 120px 80px 110px 70px 80px"
-    : "24px 1.6fr 1fr 80px 110px 70px 80px";
+    ? `24px ${nameTrack} minmax(110px, 1fr) 120px 80px 110px 70px 80px`
+    : `24px ${nameTrack} minmax(110px, 1fr) 80px 110px 70px 80px`;
+
+  // Sum of column floors + gap-3 (12px) gaps + px-4 (32px) padding. Used
+  // as min-width on header + rows so the scroller advertises horizontal
+  // overflow when the viewport can't fit every column at its minimum.
+  // Using a numeric sum (rather than `max-content`) prevents long path
+  // strings inside the NAME cell from blowing the row out to absurd
+  // widths — only the actual track minimums count.
+  const fixedTracks = 24 + 110 + 80 + 110 + 70 + 80 + (showAuthor ? 120 : 0);
+  const trackCount = showAuthor ? 8 : 7;
+  const rowMinPx = fixedTracks + nameTrackMin + (trackCount - 1) * 12 + 32;
 
   const renameMut = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
@@ -66,26 +87,11 @@ export function ProjectList({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      {/* Column headers — sticky above the virtualized rows. */}
-      <div
-        className="grid gap-3 px-4 h-6 items-center border-b border-line bg-chrome font-mono text-[10px] text-text-dim uppercase tracking-[0.6px] shrink-0"
-        style={{
-          gridTemplateColumns: gridTemplate,
-        }}
-      >
-        <span />
-        <span>name</span>
-        <span>branch</span>
-        {showAuthor && <span>author</span>}
-        <span className="text-right">loc</span>
-        <span className="text-right">size</span>
-        <span className="text-right">todos</span>
-        <span className="text-right">opened</span>
-      </div>
-
       <Virtuoso
         data={sorted}
         className="flex-1"
+        context={{ gridTemplate, showAuthor, rowMinPx }}
+        components={{ Header: ListHeader }}
         computeItemKey={(_, p) => p.id}
         itemContent={(_index, p) => (
           <div
@@ -102,6 +108,7 @@ export function ProjectList({
             className="group relative grid gap-3 px-4 items-center border-b border-line-soft cursor-pointer text-xs"
             style={{
               gridTemplateColumns: gridTemplate,
+              minWidth: rowMinPx,
               height: "var(--row-h, 26px)",
               background:
                 multiSelect.active && multiSelectIds.has(p.id)
@@ -328,6 +335,76 @@ function RenameInput({
       style={{ minWidth: 0, maxWidth: 180 }}
     />
   );
+}
+
+type ListHeaderContext = {
+  gridTemplate: string;
+  showAuthor: boolean;
+  rowMinPx: number;
+};
+
+/** Header row rendered inside the Virtuoso scroller so it shares both
+ *  axes with the data rows: sticky to the top during vertical scroll,
+ *  and pinned to the same horizontal scroll position as every row. */
+function ListHeader({ context }: { context?: ListHeaderContext }) {
+  if (!context) return null;
+  return (
+    <div
+      className="grid gap-3 px-4 h-6 items-center border-b border-line bg-chrome font-mono text-[10px] text-text-dim uppercase tracking-[0.6px] sticky top-0 z-10"
+      style={{
+        gridTemplateColumns: context.gridTemplate,
+        minWidth: context.rowMinPx,
+      }}
+    >
+      <span />
+      <span>name</span>
+      <span>branch</span>
+      {context.showAuthor && <span>author</span>}
+      <span className="text-right">loc</span>
+      <span className="text-right">size</span>
+      <span className="text-right">todos</span>
+      <span className="text-right">opened</span>
+    </div>
+  );
+}
+
+/** Measure the widest project name with an offscreen span that mirrors
+ *  the row's font. Returns the max pixel width so the NAME column can be
+ *  sized as `minmax(<this>px, 1.6fr)` and never truncate. Re-runs when
+ *  the project list changes or the theme/font swaps under us. */
+function useNameColumnMin(projects: Project[]): number {
+  const [width, setWidth] = useState(0);
+  // Track the resolved font on <body> — themes swap `--sans`, which
+  // changes how wide each name renders.
+  const fontKey = useMemo(() => {
+    if (typeof document === "undefined") return "";
+    return getComputedStyle(document.body).fontFamily;
+  }, []);
+  useEffect(() => {
+    if (typeof document === "undefined" || projects.length === 0) {
+      setWidth(0);
+      return;
+    }
+    const probe = document.createElement("span");
+    probe.style.position = "absolute";
+    probe.style.left = "-9999px";
+    probe.style.top = "0";
+    probe.style.visibility = "hidden";
+    probe.style.whiteSpace = "nowrap";
+    probe.style.fontWeight = "500";
+    probe.style.fontSize = "12px";
+    probe.style.fontFamily = getComputedStyle(document.body).fontFamily;
+    document.body.appendChild(probe);
+    let max = 0;
+    for (const p of projects) {
+      probe.textContent = p.name;
+      const w = probe.offsetWidth;
+      if (w > max) max = w;
+    }
+    document.body.removeChild(probe);
+    setWidth(max);
+  }, [projects, fontKey]);
+  return width;
 }
 
 function sortProjects(projects: Project[], sort: SortKey): Project[] {

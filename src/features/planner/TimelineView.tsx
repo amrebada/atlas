@@ -4,6 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { Tooltip } from "react-tooltip";
 
 import { Icon } from "../../components/Icon";
 import {
@@ -19,12 +20,14 @@ import { useUiStore } from "../../state/store";
 import type {
   Milestone,
   Project,
+  Routine,
   RoutineInstance,
   TimelineData,
   TimelineRow,
 } from "../../types";
 
-const LABEL_W = 160;
+const LABEL_W = 168;
+const TOOLTIP_ID = "atlas-timeline-tip";
 
 /** Full-screen timeline modal. Mounts unconditionally; renders null
  *  when `timelineOpen` is false. Esc closes. */
@@ -87,6 +90,8 @@ export function TimelineView() {
   const dates = useMemo(() => (data ? buildDates(data.start, data.end) : []), [data]);
 
   if (!open) return null;
+
+  const gridTemplate = `${LABEL_W}px repeat(${dates.length}, minmax(36px, 1fr))`;
 
   return (
     <div
@@ -170,15 +175,16 @@ export function TimelineView() {
           </div>
         ) : (
           <div className="flex-1 min-h-0 overflow-auto">
-            <DateAxis dates={dates} today={data.today} />
-            <div className="flex flex-col">
+            <div
+              className="grid items-stretch"
+              style={{ gridTemplateColumns: gridTemplate, minWidth: LABEL_W + dates.length * 36 }}
+            >
+              <DateAxis dates={dates} today={data.today} />
               {data.rows.map((row) => (
                 <RowView
                   key={row.projectId}
                   row={row}
                   dates={dates}
-                  start={data.start}
-                  end={data.end}
                   today={data.today}
                   onUnpin={() => unpinMut.mutate(row.projectId)}
                 />
@@ -187,6 +193,35 @@ export function TimelineView() {
           </div>
         )}
       </div>
+
+      {/* Single tooltip instance for every dot/bar in the grid. */}
+      <Tooltip
+        id={TOOLTIP_ID}
+        place="top"
+        delayShow={80}
+        delayHide={50}
+        opacity={1}
+        style={{
+          background: "var(--surface-2, #1f2937)",
+          color: "var(--text, #e5e7eb)",
+          border: "1px solid var(--line, #374151)",
+          borderRadius: 6,
+          padding: "8px 10px",
+          fontSize: 11,
+          maxWidth: 280,
+          zIndex: 60,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+        }}
+        render={({ content }) => {
+          if (typeof content !== "string" || !content) return null;
+          try {
+            const payload = JSON.parse(content) as TipPayload;
+            return <TipBody payload={payload} />;
+          } catch {
+            return <span>{content}</span>;
+          }
+        }}
+      />
 
       {pickerOpen && (
         <ProjectPicker
@@ -222,40 +257,35 @@ function buildDates(start: string, end: string): string[] {
 
 function DateAxis({ dates, today }: { dates: string[]; today: string }) {
   return (
-    <div
-      className="flex border-b border-line bg-surface-2/30 sticky top-0 z-10"
-      style={{ minWidth: LABEL_W + dates.length * 32 }}
-    >
+    <>
       <div
-        className="shrink-0 border-r border-line"
-        style={{ width: LABEL_W }}
+        className="border-r border-b border-line bg-surface-2/30 sticky top-0 z-10"
+        style={{ gridColumn: "1 / span 1" }}
       />
-      <div className="flex flex-1">
-        {dates.map((d) => {
-          const isToday = d === today;
-          const day = new Date(d + "T00:00:00Z");
-          const dow = day.toLocaleDateString(undefined, {
-            weekday: "narrow",
-            timeZone: "UTC",
-          });
-          const dom = day.getUTCDate();
-          return (
-            <div
-              key={d}
-              className="flex-1 min-w-[32px] py-[4px] text-center font-mono"
-              style={{
-                background: isToday ? "var(--accent)" : "transparent",
-                color: isToday ? "var(--accent-fg)" : "var(--text-dim)",
-              }}
-              title={d}
-            >
-              <div className="text-[9px] uppercase opacity-70">{dow}</div>
-              <div className="text-[10px]">{dom}</div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+      {dates.map((d) => {
+        const isToday = d === today;
+        const day = new Date(d + "T00:00:00Z");
+        const dow = day.toLocaleDateString(undefined, {
+          weekday: "narrow",
+          timeZone: "UTC",
+        });
+        const dom = day.getUTCDate();
+        return (
+          <div
+            key={d}
+            className="border-r border-b border-line py-[4px] text-center font-mono bg-surface-2/30 sticky top-0 z-10"
+            style={{
+              background: isToday ? "var(--accent)" : undefined,
+              color: isToday ? "var(--accent-fg)" : "var(--text-dim)",
+            }}
+            title={d}
+          >
+            <div className="text-[9px] uppercase opacity-70">{dow}</div>
+            <div className="text-[10px]">{dom}</div>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -264,28 +294,46 @@ function DateAxis({ dates, today }: { dates: string[]; today: string }) {
 function RowView({
   row,
   dates,
-  start,
-  end,
   today,
   onUnpin,
 }: {
   row: TimelineRow;
   dates: string[];
-  start: string;
-  end: string;
   today: string;
   onUnpin: () => void;
 }) {
-  const totalDays = dates.length;
+  // Index routines + instances by date for O(1) per-cell lookup.
+  const routineById = useMemo(() => {
+    const map = new Map<string, Routine>();
+    for (const r of row.routines) map.set(r.id, r);
+    return map;
+  }, [row.routines]);
+
+  const instancesByDate = useMemo(() => {
+    const map = new Map<string, RoutineInstance[]>();
+    for (const inst of row.routineInstances) {
+      const list = map.get(inst.scheduledFor);
+      if (list) list.push(inst);
+      else map.set(inst.scheduledFor, [inst]);
+    }
+    return map;
+  }, [row.routineInstances]);
+
+  // Milestones that intersect the visible window — split per cell
+  // (one segment per day so it lines up with the grid).
+  const milestoneSegments = useMemo(
+    () => buildMilestoneSegments(row.milestones, dates),
+    [row.milestones, dates],
+  );
+
+  const totalDots = row.routineInstances.length;
+  const totalMilestones = row.milestones.length;
 
   return (
-    <div
-      className="flex border-b border-line"
-      style={{ minWidth: LABEL_W + totalDays * 32, height: 60 }}
-    >
+    <>
       <div
-        className="shrink-0 border-r border-line flex flex-col justify-center px-[10px]"
-        style={{ width: LABEL_W }}
+        className="border-r border-b border-line flex flex-col justify-center px-[10px] py-[6px] bg-bg/60"
+        style={{ gridColumn: "1 / span 1" }}
       >
         <div className="flex items-center gap-2">
           <span
@@ -306,140 +354,181 @@ function RowView({
           </button>
         </div>
         <div className="text-[10px] font-mono text-text-dim mt-[2px]">
-          {row.milestones.length}m · {row.routineInstances.length} dots
+          {totalMilestones}m · {totalDots} dots
         </div>
       </div>
 
-      <div className="relative flex-1 bg-bg/40">
-        {/* Day grid lines */}
-        <div className="absolute inset-0 flex pointer-events-none">
-          {dates.map((d) => (
-            <div
-              key={d}
-              className="flex-1 border-r border-line-soft last:border-r-0"
-              style={{
-                background: d === today ? "var(--accent-mute, rgba(59,130,246,0.08))" : "transparent",
-              }}
-            />
-          ))}
-        </div>
+      {dates.map((d) => {
+        const isToday = d === today;
+        const dayInstances = instancesByDate.get(d) ?? [];
+        const segs = milestoneSegments.filter((s) => s.date === d);
+        return (
+          <div
+            key={d}
+            className="border-r border-b border-line relative flex flex-col justify-end items-center gap-[2px] py-[4px] px-[2px] min-h-[60px]"
+            style={{
+              background: isToday ? "var(--accent-mute, rgba(59,130,246,0.08))" : undefined,
+            }}
+          >
+            {/* Milestone segment(s): one strip per milestone occupying this day. */}
+            <div className="absolute left-0 right-0 top-[6px] flex flex-col gap-[2px] pointer-events-none">
+              {segs.map((seg) => (
+                <MilestoneSegment
+                  key={seg.milestone.id}
+                  segment={seg}
+                  projectName={row.projectName}
+                  projectColor={row.projectColor}
+                  today={today}
+                />
+              ))}
+            </div>
 
-        {/* Milestone bars */}
-        {row.milestones.map((m) => (
-          <MilestoneBar
-            key={m.id}
-            milestone={m}
-            color={row.projectColor}
-            start={start}
-            end={end}
-            today={today}
-          />
-        ))}
-
-        {/* Routine instance dots */}
-        {row.routineInstances.map((inst) => (
-          <RoutineDot
-            key={inst.id}
-            instance={inst}
-            color={row.projectColor}
-            start={start}
-            end={end}
-            today={today}
-          />
-        ))}
-      </div>
-    </div>
+            {/* Routine dots: stacked, click target with rich tooltip. */}
+            <div className="flex flex-row flex-wrap gap-[2px] justify-center mt-auto">
+              {dayInstances.map((inst) => {
+                const routine = routineById.get(inst.routineId);
+                return (
+                  <RoutineDot
+                    key={inst.id}
+                    instance={inst}
+                    routine={routine}
+                    projectName={row.projectName}
+                    color={row.projectColor}
+                    today={today}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
-// ----- bar -----
+// ----- milestone bar segments -----
 
-function MilestoneBar({
-  milestone,
-  color,
-  start,
-  end,
+type MilestoneSegment = {
+  date: string;
+  milestone: Milestone;
+  isStart: boolean;
+  isEnd: boolean;
+};
+
+function buildMilestoneSegments(
+  milestones: Milestone[],
+  dates: string[],
+): MilestoneSegment[] {
+  if (dates.length === 0) return [];
+  const winStart = dates[0]!;
+  const winEnd = dates[dates.length - 1]!;
+  const inWindow = (d: string) => d >= winStart && d <= winEnd;
+
+  const out: MilestoneSegment[] = [];
+  for (const m of milestones) {
+    const created = m.createdAt.slice(0, 10);
+    const startDate = created < winStart ? winStart : created;
+    const endDate = m.deadline > winEnd ? winEnd : m.deadline;
+    if (m.deadline < winStart) continue;
+    if (startDate > winEnd) continue;
+    for (const d of dates) {
+      if (d < startDate || d > endDate) continue;
+      if (!inWindow(d)) continue;
+      out.push({
+        date: d,
+        milestone: m,
+        isStart: d === startDate,
+        isEnd: d === endDate,
+      });
+    }
+  }
+  return out;
+}
+
+function MilestoneSegment({
+  segment,
+  projectName,
+  projectColor,
   today,
 }: {
-  milestone: Milestone;
-  color: string;
-  start: string;
-  end: string;
+  segment: MilestoneSegment;
+  projectName: string;
+  projectColor: string;
   today: string;
 }) {
-  // Bar: from creation (clamped to window start) to deadline (clamped
-  // to window end). Skip rendering if the milestone ends before the
-  // window starts.
-  const winStart = isoToTs(start);
-  const winEnd = isoToTs(end);
-  const dl = isoToTs(milestone.deadline);
-  const created = isoToTs(milestone.createdAt.slice(0, 10));
-  if (dl < winStart) return null;
-
-  const barStart = Math.max(created, winStart);
-  const barEnd = Math.min(dl, winEnd);
-  if (barEnd <= barStart) return null;
-
-  const totalSpan = winEnd - winStart;
-  const leftPct = ((barStart - winStart) / totalSpan) * 100;
-  const widthPct = ((barEnd - barStart) / totalSpan) * 100;
-
+  const { milestone, isStart, isEnd } = segment;
   const health = healthFor(milestone, today);
-
+  const tip: TipPayload = {
+    kind: "milestone",
+    title: milestone.title,
+    project: projectName,
+    deadline: milestone.deadline,
+    status: milestone.status,
+    priority: milestone.priority,
+    healthLabel: health.label,
+    description: milestone.description ?? null,
+  };
+  const tipString = JSON.stringify(tip);
   return (
     <div
-      className="absolute rounded-[4px] cursor-default group"
+      data-tooltip-id={TOOLTIP_ID}
+      data-tooltip-content={tipString}
+      className="h-[14px] pointer-events-auto cursor-default flex items-center"
       style={{
-        left: `${leftPct}%`,
-        width: `calc(${widthPct}% + 2px)`,
-        top: 8,
-        height: 20,
-        background: color,
+        background: projectColor,
         opacity: milestone.status === "done" ? 0.4 : 0.85,
+        borderTopLeftRadius: isStart ? 4 : 0,
+        borderBottomLeftRadius: isStart ? 4 : 0,
+        borderTopRightRadius: isEnd ? 4 : 0,
+        borderBottomRightRadius: isEnd ? 4 : 0,
+        marginLeft: isStart ? 1 : 0,
+        marginRight: isEnd ? 1 : 0,
       }}
-      title={`${milestone.title} — ${milestone.deadline} (${health.label})`}
     >
-      <div className="absolute inset-0 flex items-center px-[6px] gap-1 overflow-hidden">
-        <span className="text-[10px] font-semibold truncate text-white drop-shadow">
+      {isStart && (
+        <span className="text-[9px] font-semibold text-white truncate px-[4px] drop-shadow whitespace-nowrap">
           {milestone.title}
         </span>
-        <span className="flex-1" />
+      )}
+      {isEnd && (
         <span
-          className="w-[6px] h-[6px] rounded-full shrink-0"
+          className="ml-auto w-[6px] h-[6px] rounded-full shrink-0 mr-[3px]"
           style={{ background: health.color }}
         />
-      </div>
+      )}
     </div>
   );
 }
 
-// ----- dot -----
+// ----- routine dot -----
 
 function RoutineDot({
   instance,
+  routine,
+  projectName,
   color,
-  start,
-  end,
   today,
 }: {
   instance: RoutineInstance;
+  routine: Routine | undefined;
+  projectName: string;
   color: string;
-  start: string;
-  end: string;
   today: string;
 }) {
-  const winStart = isoToTs(start);
-  const winEnd = isoToTs(end);
-  const sched = isoToTs(instance.scheduledFor);
-  if (sched < winStart || sched > winEnd) return null;
-
-  const totalSpan = winEnd - winStart;
-  const leftPct = ((sched - winStart) / totalSpan) * 100;
-
   const filled = !!instance.doneAt;
   const skipped = !!instance.skipped;
   const missed = instance.failingPoints > 0;
   const overdue = !filled && !skipped && instance.scheduledFor < today;
+
+  const status: TipStatus = filled
+    ? "done"
+    : skipped
+      ? "skipped"
+      : missed
+        ? "missed"
+        : overdue
+          ? "overdue"
+          : "upcoming";
 
   const ringColor = missed
     ? "var(--err, #ef4444)"
@@ -447,28 +536,116 @@ function RoutineDot({
       ? "var(--warn, #f59e0b)"
       : color;
 
+  const tip: TipPayload = {
+    kind: "routine",
+    title: routine?.title ?? "Routine instance",
+    project: projectName,
+    scheduledFor: instance.scheduledFor,
+    status,
+    priority: routine?.priority ?? "p2",
+    description: routine?.description ?? null,
+    rrule: routine?.rrule ?? null,
+    doneAt: instance.doneAt ?? null,
+  };
+  const tipString = JSON.stringify(tip);
+
   return (
-    <div
-      className="absolute"
+    <span
+      data-tooltip-id={TOOLTIP_ID}
+      data-tooltip-content={tipString}
+      className="block rounded-full cursor-default"
       style={{
-        left: `calc(${leftPct}% + 1px)`,
-        bottom: 6,
-        transform: "translateX(-50%)",
+        width: 10,
+        height: 10,
+        background: filled ? color : "transparent",
+        border: `1.5px solid ${ringColor}`,
+        opacity: skipped ? 0.4 : 1,
       }}
-      title={`${instance.scheduledFor} — ${
-        filled ? "done" : skipped ? "skipped" : missed ? "missed" : overdue ? "overdue" : "upcoming"
-      }`}
-    >
-      <span
-        className="block rounded-full"
-        style={{
-          width: 10,
-          height: 10,
-          background: filled ? color : "transparent",
-          border: `1.5px solid ${ringColor}`,
-          opacity: skipped ? 0.4 : 1,
-        }}
-      />
+    />
+  );
+}
+
+// ----- tooltip body -----
+
+type TipStatus = "done" | "skipped" | "missed" | "overdue" | "upcoming";
+
+type TipPayload =
+  | {
+      kind: "routine";
+      title: string;
+      project: string;
+      scheduledFor: string;
+      status: TipStatus;
+      priority: string;
+      description: string | null;
+      rrule: string | null;
+      doneAt: string | null;
+    }
+  | {
+      kind: "milestone";
+      title: string;
+      project: string;
+      deadline: string;
+      status: string;
+      priority: string;
+      healthLabel: string;
+      description: string | null;
+    };
+
+function TipBody({ payload }: { payload: TipPayload }) {
+  if (payload.kind === "routine") {
+    return (
+      <div className="flex flex-col gap-[4px] min-w-[180px]">
+        <div className="text-[12px] font-semibold leading-tight">
+          {payload.title}
+        </div>
+        <div className="text-[10px] text-text-dim font-mono uppercase tracking-[0.4px]">
+          routine · {payload.priority} · {payload.status}
+        </div>
+        <div className="text-[11px]">
+          <span className="text-text-dim">Project</span> · {payload.project}
+        </div>
+        <div className="text-[11px]">
+          <span className="text-text-dim">Scheduled</span> ·{" "}
+          {payload.scheduledFor}
+        </div>
+        {payload.doneAt && (
+          <div className="text-[11px]">
+            <span className="text-text-dim">Done</span> ·{" "}
+            {payload.doneAt.slice(0, 16).replace("T", " ")}
+          </div>
+        )}
+        {payload.rrule && (
+          <div className="text-[10px] font-mono text-text-dim truncate max-w-[260px]">
+            {payload.rrule}
+          </div>
+        )}
+        {payload.description && (
+          <div className="text-[11px] text-text-dim">{payload.description}</div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-[4px] min-w-[180px]">
+      <div className="text-[12px] font-semibold leading-tight">
+        {payload.title}
+      </div>
+      <div className="text-[10px] text-text-dim font-mono uppercase tracking-[0.4px]">
+        milestone · {payload.priority} · {payload.healthLabel}
+      </div>
+      <div className="text-[11px]">
+        <span className="text-text-dim">Project</span> · {payload.project}
+      </div>
+      <div className="text-[11px]">
+        <span className="text-text-dim">Deadline</span> · {payload.deadline}
+      </div>
+      <div className="text-[11px]">
+        <span className="text-text-dim">Status</span> · {payload.status}
+      </div>
+      {payload.description && (
+        <div className="text-[11px] text-text-dim">{payload.description}</div>
+      )}
     </div>
   );
 }
@@ -578,10 +755,6 @@ function ProjectPicker({
 }
 
 // ----- helpers -----
-
-function isoToTs(iso: string): number {
-  return new Date(iso + "T00:00:00Z").getTime();
-}
 
 /** Replace `$HOME` (best-effort detected from any project path) with `~`
  *  so long absolute paths fit in the picker row. Falls back to the raw

@@ -47,7 +47,7 @@ pub enum TodayItem {
         days_overdue: i64,
         pinned_today: bool,
     },
-    #[serde(rename_all = "camelCase")]
+    #[serde(rename = "milestone-deadline", rename_all = "camelCase")]
     #[ts(rename = "milestone-deadline")]
     MilestoneDeadline {
         id: MilestoneId,
@@ -59,7 +59,7 @@ pub enum TodayItem {
         #[ts(type = "number")]
         score: f64,
     },
-    #[serde(rename_all = "camelCase")]
+    #[serde(rename = "routine-instance", rename_all = "camelCase")]
     #[ts(rename = "routine-instance")]
     RoutineInstance {
         id: String,

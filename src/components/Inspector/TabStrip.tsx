@@ -15,8 +15,8 @@ const TABS: TabSpec[] = [
   { id: "sessions", icon: "term", label: "Sessions" },
   { id: "scripts", icon: "play", label: "Scripts" },
   { id: "todos", icon: "check", label: "Todos" },
-  { id: "milestones", icon: "clock", label: "Milestones" },
-  { id: "routines", icon: "branch", label: "Routines" },
+  { id: "milestones", icon: "flag", label: "Milestones" },
+  { id: "routines", icon: "repeat", label: "Routines" },
   { id: "notes", icon: "note", label: "Notes" },
   { id: "disk", icon: "hdd", label: "Disk" },
 ];

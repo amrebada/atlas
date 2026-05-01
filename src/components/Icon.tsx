@@ -40,7 +40,9 @@ export type IconName =
   | "sparkle"
   | "cmd"
   | "note"
-  | "hdd";
+  | "hdd"
+  | "flag"
+  | "repeat";
 
 interface IconProps {
   name: IconName;
@@ -327,6 +329,24 @@ export function Icon({
         <svg {...p}>
           <rect x="1.5" y="4" width="13" height="8" rx="1" />
           <circle cx="11.5" cy="8" r="0.8" fill={stroke} />
+        </svg>
+      );
+    case "flag":
+      // A milestone marker — pole + triangular flag.
+      return (
+        <svg {...p}>
+          <path d="M3.5 2v12" />
+          <path d="M3.5 3h8.5l-2 2.75 2 2.75H3.5" />
+        </svg>
+      );
+    case "repeat":
+      // Recurring routine — two looped arrows.
+      return (
+        <svg {...p}>
+          <path d="M3 7V6a2 2 0 012-2h7" />
+          <path d="M10 2l2.5 2L10 6" />
+          <path d="M13 9v1a2 2 0 01-2 2H4" />
+          <path d="M6 14l-2.5-2L6 10" />
         </svg>
       );
     default:
