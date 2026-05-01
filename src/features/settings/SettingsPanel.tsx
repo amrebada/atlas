@@ -928,6 +928,7 @@ function ShortcutsSection({ settings }: { settings?: Settings }) {
       ["Open settings", ["⌘", ","]],
       ["Open selected in editor", ["⌘", "E"]],
       ["Toggle terminal", ["⌃", "`"]],
+      ["Toggle Today Plan", ["⌘", "T"]],
       ["Focus search", ["/"]],
       ["Toggle pin", ["P"]],
       ["Archive", ["⌘", "⇧", "A"]],
