@@ -303,13 +303,16 @@ impl WatcherManager {
             let _enter = span.enter();
 
             for ev in events {
-                let is_dir = matches!(
+                let kind_implies_dir = matches!(
                     ev.event.kind,
                     notify::EventKind::Create(notify::event::CreateKind::Folder)
                         | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
                 );
 
                 for p in &ev.event.paths {
+                    // macOS FSEvents often reports Create(Any) for new
+                    // directories; stat the path so we don't miss them.
+                    let is_dir = kind_implies_dir || p.is_dir();
                     let kind = classify(p, &roots, is_dir);
                     self.dispatch(kind);
                 }
@@ -322,7 +325,13 @@ impl WatcherManager {
         match kind {
             EventKind::Ignored => {}
             EventKind::GitMetadata { repo_root } => {
-                self.spawn_git_status(repo_root);
+                // A `.git/*` event can be the *first* signal we ever get
+                // for a repo — e.g. `git init` inside an already-tracked
+                // directory, or a `git clone` whose folder-create event
+                // raced ahead of `.git/` existing. Route through the
+                // discovery probe so unknown repos get inserted before we
+                // try to apply status.
+                self.spawn_discovery_probe(repo_root);
             }
             EventKind::AtlasJson { repo_root, .. } => {
                 // bumps. Project id comes from D2's `project_id_for_path`
@@ -422,11 +431,13 @@ impl WatcherManager {
                 return;
             }
 
-            // `discover_root(path, 0)` scans just this single dir (depth 0
+            // Walk one level into `path` so the walker can see `path/.git`
+            // — `max_depth(0)` only yields the root entry itself and would
+            // never spot the marker.
             let db_for_call = db.clone();
             let path_for_call = path.clone();
             let new_ids = match tauri::async_runtime::block_on(async move {
-                db_for_call.discover_root(&path_for_call, 0).await
+                db_for_call.discover_root(&path_for_call, 1).await
             }) {
                 Ok(ids) => ids,
                 Err(e) => {

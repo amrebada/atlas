@@ -499,6 +499,8 @@ function GitSection({ settings }: { settings?: Settings }) {
 function WatchersSection() {
   const queryClient = useQueryClient();
   const pushToast = useUiStore((s) => s.pushToast);
+  const [pendingRemove, setPendingRemove] = useState<WatchRoot | null>(null);
+  const [resyncingPath, setResyncingPath] = useState<string | null>(null);
 
   const { data: watchers = [] } = useQuery<WatchRoot[]>({
     queryKey: ["watchRoots"],
@@ -517,13 +519,41 @@ function WatchersSection() {
   });
 
   const removeMut = useMutation({
-    mutationFn: (path: string) => removeWatcher(path),
-    onSuccess: (_res, path) => {
+    mutationFn: ({ path, cascade }: { path: string; cascade: boolean }) =>
+      removeWatcher(path, cascade).then((removed) => ({ path, removed })),
+    onSuccess: ({ path, removed }, vars) => {
       queryClient.invalidateQueries({ queryKey: ["watchRoots"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
-      pushToast("info", `Stopped watching ${path}`);
+      const msg = vars.cascade
+        ? `Stopped watching ${path} · removed ${removed} project${removed === 1 ? "" : "s"}`
+        : `Stopped watching ${path}`;
+      pushToast("info", msg);
+      setPendingRemove(null);
     },
-    onError: (err) => pushToast("error", `Remove failed: ${String(err)}`),
+    onError: (err) => {
+      pushToast("error", `Remove failed: ${String(err)}`);
+      setPendingRemove(null);
+    },
+  });
+
+  const resyncMut = useMutation({
+    mutationFn: ({ path, depth }: { path: string; depth: number }) =>
+      discoverProjects(path, depth).then((ids) => ({ path, ids })),
+    onMutate: ({ path }) => setResyncingPath(path),
+    onSettled: () => setResyncingPath(null),
+    onSuccess: ({ path, ids }) => {
+      queryClient.invalidateQueries({ queryKey: ["watchRoots"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      if (ids.length === 0) {
+        pushToast("info", `Resynced ${path} · no new projects`);
+      } else {
+        pushToast(
+          "success",
+          `Resynced ${path} · ${ids.length} new project${ids.length === 1 ? "" : "s"} discovered`,
+        );
+      }
+    },
+    onError: (err) => pushToast("error", `Resync failed: ${String(err)}`),
   });
 
   const onAdd = async () => {
@@ -559,46 +589,57 @@ function WatchersSection() {
           No watchers configured.
         </div>
       )}
-      {watchers.map((w) => (
-        <div
-          key={w.path}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "10px 0",
-            borderBottom: "1px solid var(--line-soft)",
-          }}
-        >
-          <Icon name="folder" size={14} stroke="var(--text-dim)" />
-          <code style={{ ...CODE_STYLE, flex: 1 }}>{w.path}</code>
-          <span
+      {watchers.map((w) => {
+        const isResyncing = resyncingPath === w.path;
+        return (
+          <div
+            key={w.path}
             style={{
-              fontSize: 11,
-              fontFamily: "var(--mono)",
-              color: "var(--text-dim)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 0",
+              borderBottom: "1px solid var(--line-soft)",
             }}
           >
-            depth {w.depth}
-          </span>
-          <span
-            style={{
-              fontSize: 11,
-              fontFamily: "var(--mono)",
-              color: "var(--text-dim)",
-            }}
-          >
-            {w.repoCount} repos
-          </span>
-          <button
-            style={GHOST_BTN}
-            disabled={removeMut.isPending}
-            onClick={() => removeMut.mutate(w.path)}
-          >
-            Remove
-          </button>
-        </div>
-      ))}
+            <Icon name="folder" size={14} stroke="var(--text-dim)" />
+            <code style={{ ...CODE_STYLE, flex: 1 }}>{w.path}</code>
+            <span
+              style={{
+                fontSize: 11,
+                fontFamily: "var(--mono)",
+                color: "var(--text-dim)",
+              }}
+            >
+              depth {w.depth}
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                fontFamily: "var(--mono)",
+                color: "var(--text-dim)",
+              }}
+            >
+              {w.repoCount} repos
+            </span>
+            <button
+              style={GHOST_BTN}
+              disabled={isResyncing}
+              onClick={() => resyncMut.mutate({ path: w.path, depth: w.depth })}
+              title="Re-scan this folder for new git repos"
+            >
+              {isResyncing ? "Resyncing…" : "Resync"}
+            </button>
+            <button
+              style={GHOST_BTN}
+              disabled={removeMut.isPending}
+              onClick={() => setPendingRemove(w)}
+            >
+              Remove
+            </button>
+          </div>
+        );
+      })}
       <button
         onClick={onAdd}
         disabled={addMut.isPending}
@@ -607,7 +648,126 @@ function WatchersSection() {
         <Icon name="plus" size={11} />
         {addMut.isPending ? "Adding…" : "Add watcher…"}
       </button>
+      {pendingRemove && (
+        <RemoveWatcherDialog
+          watcher={pendingRemove}
+          pending={removeMut.isPending}
+          onCancel={() => setPendingRemove(null)}
+          onConfirm={(cascade) =>
+            removeMut.mutate({ path: pendingRemove.path, cascade })
+          }
+        />
+      )}
     </div>
+  );
+}
+
+// Confirmation modal for removing a watcher. Two paths: keep the indexed
+// projects (default) or unindex them along with the watcher. Filesystem is
+// never touched either way.
+function RemoveWatcherDialog({
+  watcher,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  watcher: WatchRoot;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: (cascade: boolean) => void;
+}) {
+  const repoLabel = `${watcher.repoCount} project${
+    watcher.repoCount === 1 ? "" : "s"
+  }`;
+  return createPortal(
+    <div
+      onClick={pending ? undefined : onCancel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 410,
+        background: "rgba(0,0,0,0.45)",
+        backdropFilter: "blur(3px)",
+        WebkitBackdropFilter: "blur(3px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Remove watcher"
+        style={{
+          width: 460,
+          padding: 20,
+          background: "var(--surface)",
+          border: "1px solid var(--line)",
+          borderRadius: 10,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+          color: "var(--text)",
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+          Stop watching this folder?
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--text-dim)",
+            marginBottom: 6,
+            fontFamily: "var(--mono)",
+            wordBreak: "break-all",
+          }}
+        >
+          <span style={{ color: "var(--text)" }}>{watcher.path}</span>
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--text-dim)",
+            marginBottom: 14,
+          }}
+        >
+          {watcher.repoCount > 0
+            ? `Atlas has ${repoLabel} indexed under this folder. Files on disk are never touched — only the index entries are removed.`
+            : "Files on disk are never touched."}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={pending}
+            style={GHOST_BTN}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(false)}
+            disabled={pending}
+            style={GHOST_BTN}
+          >
+            Keep projects
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(true)}
+            disabled={pending || watcher.repoCount === 0}
+            style={{
+              ...GHOST_BTN,
+              color: "var(--danger)",
+              borderColor: "var(--danger)",
+              opacity: watcher.repoCount === 0 ? 0.5 : 1,
+            }}
+          >
+            {pending ? "Removing…" : `Remove ${repoLabel}`}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

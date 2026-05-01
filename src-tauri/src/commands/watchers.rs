@@ -183,12 +183,19 @@ pub async fn watchers_add(
 }
 
 /// IPC `watchers_remove` → spec `settings.watchers.remove`.
+///
+/// When `cascade` is `Some(true)` we also drop every indexed project whose
+/// path lives under this watcher. Files on disk are not touched — this is
+/// an unindex, not a trash — and per-id `project:removed` events are
+/// emitted so the UI list updates without a manual refresh.
 #[tauri::command]
 pub async fn watchers_remove(
+    app: AppHandle,
     state: tauri::State<'_, WatcherManager>,
     db: tauri::State<'_, Db>,
     path: String,
-) -> Result<(), String> {
+    cascade: Option<bool>,
+) -> Result<u32, String> {
     let root = Path::new(&path);
     state
         .remove_root(root)
@@ -196,5 +203,19 @@ pub async fn watchers_remove(
     db.remove_watcher(root)
         .await
         .map_err(|e: anyhow::Error| format!("persist remove: {e}"))?;
-    Ok(())
+
+    if cascade.unwrap_or(false) {
+        let removed = db
+            .delete_projects_under(root)
+            .await
+            .map_err(|e: anyhow::Error| format!("unindex projects under {path}: {e}"))?;
+        for id in &removed {
+            if let Err(e) = events::emit_project_removed(&app, id) {
+                tracing::warn!(error = %e, id = %id, "emit project:removed (cascade)");
+            }
+        }
+        return Ok(removed.len() as u32);
+    }
+
+    Ok(0)
 }

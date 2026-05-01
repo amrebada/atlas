@@ -109,8 +109,11 @@ export const watchersList = listWatchers;
 export const addWatcher = (path: string, depth = 3) =>
   invoke<void>("watchers_add", { path, depth });
 
-export const removeWatcher = (path: string) =>
-  invoke<void>("watchers_remove", { path });
+/** Stop watching `path`. When `cascade` is true, also remove every indexed
+ *  project under that path from Atlas's database (files on disk are left
+ *  alone). Resolves to the number of projects that were unindexed. */
+export const removeWatcher = (path: string, cascade = false) =>
+  invoke<number>("watchers_remove", { path, cascade });
 
 // ---------- tags ----------
 

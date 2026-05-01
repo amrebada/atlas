@@ -646,6 +646,41 @@ impl Db {
         Ok(())
     }
 
+    /// Delete every project row whose `path` is under `root` (prefix match
+    /// or exact). Returns the ids of the rows that were removed so callers
+    /// can emit per-id `project:removed` events. On-disk files are left
+    /// alone — this is an unindex, not a trash.
+    pub async fn delete_projects_under(&self, root: &Path) -> anyhow::Result<Vec<String>> {
+        let root_str = root.to_string_lossy();
+        let prefix = if root_str.ends_with('/') {
+            format!("{}%", escape_like(&root_str))
+        } else {
+            format!("{}/%", escape_like(&root_str))
+        };
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT id FROM projects \
+             WHERE path = ? OR path LIKE ? ESCAPE '\\'",
+        )
+        .bind(root_str.as_ref())
+        .bind(&prefix)
+        .fetch_all(&self.pool)
+        .await?;
+        let ids: Vec<String> = rows.into_iter().map(|(id,)| id).collect();
+        if ids.is_empty() {
+            return Ok(ids);
+        }
+        // FK cascades on the project-owned tables clean up the children.
+        sqlx::query(
+            "DELETE FROM projects \
+             WHERE path = ? OR path LIKE ? ESCAPE '\\'",
+        )
+        .bind(root_str.as_ref())
+        .bind(&prefix)
+        .execute(&self.pool)
+        .await?;
+        Ok(ids)
+    }
+
     /// Count projects whose `path` is under `root` (prefix match). Used
     pub async fn count_projects_under(&self, root: &Path) -> anyhow::Result<u32> {
         let root_str = root.to_string_lossy();
