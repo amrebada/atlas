@@ -257,7 +257,11 @@ pub async fn files_diff(
 /// from disk so untracked files surface naturally.
 fn read_file_diff(project_path: &Path, rel_path: &str) -> anyhow::Result<FileDiff> {
     let rel = Path::new(rel_path);
-    if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if rel.is_absolute()
+        || rel
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         anyhow::bail!("invalid path: {rel_path}");
     }
 
