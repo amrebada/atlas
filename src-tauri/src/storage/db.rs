@@ -754,6 +754,8 @@ impl Db {
         let color = color_for_lang(&repo.language);
 
         // Upsert the project row. On conflict we refresh the volatile
+        // discovery-derived columns but preserve `name` — the user may
+        // have renamed the project, and a re-scan must not clobber it.
         sqlx::query(
             "INSERT INTO projects (id, name, path, language, color, branch, \
                                    dirty, ahead, behind, loc, size_bytes, disk_bytes, last_opened, \
@@ -761,7 +763,6 @@ impl Db {
                                    time_tracked, updated_at, discovered_at, source) \
              VALUES (?, ?, ?, ?, ?, '', 0, 0, 0, 0, 0, 0, NULL, 0, 0, 0, 0, '', ?, ?, 'discovery') \
              ON CONFLICT(id) DO UPDATE SET \
-                 name       = excluded.name, \
                  path       = excluded.path, \
                  language   = excluded.language, \
                  color      = excluded.color, \
@@ -777,12 +778,15 @@ impl Db {
         .execute(&self.pool)
         .await?;
 
-        // Re-sync the FTS row. FTS5 with `content=projects` would normally
-        let rowid: (i64,) = sqlx::query_as("SELECT rowid FROM projects WHERE id = ?")
-            .bind(&id)
-            .fetch_one(&self.pool)
-            .await?;
-        fts_replace_project(&self.pool, rowid.0, &repo.name, &path_str, "").await?;
+        // Re-sync the FTS row using whatever name is actually stored
+        // (which may differ from `repo.name` if the user renamed the
+        // project earlier).
+        let row: (i64, String) =
+            sqlx::query_as("SELECT rowid, name FROM projects WHERE id = ?")
+                .bind(&id)
+                .fetch_one(&self.pool)
+                .await?;
+        fts_replace_project(&self.pool, row.0, &row.1, &path_str, "").await?;
 
         Ok(id)
     }
@@ -2393,6 +2397,36 @@ mod tests {
         assert!(hits.iter().any(|p| p.name == "alpha"));
 
         // Cleanup.
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// Regression: a user-supplied rename must survive a subsequent
+    /// discovery pass over the same root. Previously the upsert
+    /// overwrote `name` with the directory-derived name, so the
+    /// rename appeared to vanish on every app restart.
+    #[tokio::test]
+    async fn rediscovery_preserves_user_rename() -> anyhow::Result<()> {
+        let db = Db::open_in_memory().await?;
+        let root = mkrepo_tree("rename-survives", &[("alpha", &["Cargo.toml"])]);
+
+        let new_ids = db.discover_root(&root, 3).await?;
+        assert_eq!(new_ids.len(), 1);
+        let id = new_ids[0].clone();
+
+        db.rename_project(&id, "alpha-rebrand").await?;
+
+        // Re-scan the same root - simulates app startup / watcher probe.
+        let second = db.discover_root(&root, 3).await?;
+        assert_eq!(second.len(), 0, "no new ids on re-scan");
+
+        let after = db.get_project(&id).await?.expect("project still indexed");
+        assert_eq!(after.name, "alpha-rebrand", "rename must be preserved");
+
+        // FTS must see the user-chosen name.
+        let hits = db.search_projects("rebrand").await?;
+        assert!(hits.iter().any(|p| p.id == id));
+
         let _ = std::fs::remove_dir_all(&root);
         Ok(())
     }
