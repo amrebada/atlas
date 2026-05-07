@@ -9,7 +9,7 @@ use crate::storage::json::{read_json, write_json};
 use crate::storage::templates::builtin_templates;
 use crate::storage::types::{
     AdvancedSettings, CloneDepth, EditorsSettings, FullLiteral, GeneralSettings, GitPollInterval,
-    GitSettings, Settings, Template, Theme,
+    GitSettings, ProvidersSettings, Settings, Template, Theme,
 };
 
 /// Filename inside `<app_data>/atlas/` - kept private so callers must go
@@ -24,6 +24,7 @@ const TOP_LEVEL_KEYS: &[&str] = &[
     "templates",
     "shortcuts",
     "advanced",
+    "providers",
 ];
 
 /// Resolve the on-disk `settings.json` path for an app-data dir.
@@ -86,6 +87,7 @@ pub fn default_settings() -> Settings {
             // Opt-in: user must toggle this on in Settings → Advanced
             crash_log: false,
         },
+        providers: ProvidersSettings::default(),
     }
 }
 

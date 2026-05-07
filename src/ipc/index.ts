@@ -407,16 +407,48 @@ export const searchNotes = (projectId: string, query: string) =>
 
 // Shape returned by `sessions_resume_info` - the command + argv + cwd a
 export interface ResumeInfo {
+  sessionId: string;
+  provider: string;
   command: string;
   args: string[];
   cwd: string;
 }
 
-export const listSessions = (projectId: string) =>
-  invoke<Session[]>("sessions_list", { projectId });
+export const listSessions = (projectId: string, provider?: string) =>
+  invoke<Session[]>("sessions_list", {
+    projectId,
+    provider: provider ?? null,
+  });
 
-export const sessionResumeInfo = (sessionId: string) =>
-  invoke<ResumeInfo>("sessions_resume_info", { sessionId });
+export const sessionResumeInfo = (sessionId: string, provider?: string) =>
+  invoke<ResumeInfo>("sessions_resume_info", {
+    sessionId,
+    provider: provider ?? null,
+  });
+
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  binaryName: string;
+  available: boolean;
+  enabled: boolean;
+  isDefault: boolean;
+}
+
+export interface ProviderInvocation {
+  provider: string;
+  command: string;
+  args: string[];
+  cwd: string;
+}
+
+export const listProviders = () => invoke<ProviderInfo[]>("providers_list");
+
+export const providerNewInvocation = (providerId: string, projectId: string) =>
+  invoke<ProviderInvocation>("providers_new_invocation", {
+    providerId,
+    projectId,
+  });
 
 
 // Tauri commands. The wrappers below exist so U5 can compile and

@@ -161,6 +161,8 @@ export interface Script {
 
 export interface Session {
   id: SessionId;
+  /** Provider id (`"claude"` | `"codex"` | `"opencode"` | …). */
+  provider: string;
   projectPath: string;
   title: string;
   /** ISO-8601. */
@@ -303,6 +305,13 @@ export interface AdvancedSettings {
   shell: string;
 }
 
+export interface ProvidersSettings {
+  /** Per-provider enable flag. Missing entries default to `true`. */
+  enabled: Record<string, boolean>;
+  /** Provider id used by the "+ new session" main click. */
+  defaultId: string;
+}
+
 export interface Settings {
   general: GeneralSettings;
   editors: EditorsSettings;
@@ -311,6 +320,7 @@ export interface Settings {
   templates: Template[];
   shortcuts: Record<string, string>;
   advanced: AdvancedSettings;
+  providers: ProvidersSettings;
 }
 
 

@@ -290,6 +290,9 @@ pub struct Script {
 )]
 pub struct Session {
     pub id: SessionId,
+    /// Provider id (`"claude"` | `"codex"` | `"opencode"` | …).
+    #[serde(default = "default_provider_id")]
+    pub provider: String,
     pub project_path: String,
     pub title: String,
     pub when: String,
@@ -301,6 +304,10 @@ pub struct Session {
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+}
+
+fn default_provider_id() -> String {
+    "claude".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -492,6 +499,40 @@ pub struct AdvancedSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct ProvidersSettings {
+    /// Per-provider enable flag. Missing entries default to `true` so
+    /// newly-registered providers light up automatically.
+    pub enabled: std::collections::HashMap<String, bool>,
+    /// Provider id used by the "+ new session" main click.
+    pub default_id: String,
+}
+
+impl Default for ProvidersSettings {
+    fn default() -> Self {
+        let mut enabled = std::collections::HashMap::new();
+        enabled.insert("claude".into(), true);
+        enabled.insert("codex".into(), false);
+        enabled.insert("opencode".into(), false);
+        Self {
+            enabled,
+            default_id: "claude".into(),
+        }
+    }
+}
+
+impl ProvidersSettings {
+    pub fn is_enabled(&self, id: &str) -> bool {
+        self.enabled.get(id).copied().unwrap_or(true)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/rust.ts")]
 pub struct Settings {
     pub general: GeneralSettings,
@@ -501,6 +542,10 @@ pub struct Settings {
     pub templates: Vec<Template>,
     pub shortcuts: std::collections::HashMap<String, String>,
     pub advanced: AdvancedSettings,
+    /// Multi-provider session config. `serde(default)` keeps older
+    /// `settings.json` files loadable without a migration step.
+    #[serde(default)]
+    pub providers: ProvidersSettings,
 }
 
 // ---------- Palette ----------

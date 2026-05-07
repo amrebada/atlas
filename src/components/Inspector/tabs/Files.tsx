@@ -51,7 +51,7 @@ export function Files({ project }: FilesProps) {
   const pushToast = useUiStore((s) => s.pushToast);
   const queryClient = useQueryClient();
 
-  const { data, isLoading, error, refetch } = useQuery<FileNode[]>({
+  const { data, isLoading, isFetching, error, refetch } = useQuery<FileNode[]>({
     queryKey: ["files", project.id, mode],
     queryFn: () => listFiles(project.id, mode === "changed"),
     // Files change frequently; keep the cache short.
@@ -164,6 +164,17 @@ export function Files({ project }: FilesProps) {
           <span className="text-accent">+{counts.added}</span>
           <span className="text-danger">−{counts.deleted}</span>
         </span>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          disabled={isFetching}
+          title="Rescan files"
+          aria-label="Rescan files"
+          className="inline-flex items-center gap-[5px] px-[8px] py-[3px] font-mono text-[10px] text-text-dim border border-line rounded-[3px] hover:text-text disabled:opacity-50"
+        >
+          <Icon name="repeat" size={10} stroke="currentColor" />
+          {isFetching ? "scanning…" : "rescan"}
+        </button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden">

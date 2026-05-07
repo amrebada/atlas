@@ -1,4 +1,4 @@
-import type { CSSProperties, SVGProps } from "react";
+import { useId, type CSSProperties, type SVGProps } from "react";
 
 // Atlas - shared icon set.
 
@@ -43,7 +43,8 @@ export type IconName =
   | "note"
   | "hdd"
   | "flag"
-  | "repeat";
+  | "repeat"
+  | "code-sparkle";
 
 interface IconProps {
   name: IconName;
@@ -63,6 +64,9 @@ export function Icon({
   className,
   style,
 }: IconProps) {
+  // Stable unique gradient id per render so multiple instances of a
+  // gradient-style icon on the same page don't collide.
+  const reactId = useId();
   // `flexShrink: 0` keeps icons from being squeezed by long sibling text
   const p: SVGProps<SVGSVGElement> = {
     width: size,
@@ -356,6 +360,44 @@ export function Icon({
           <path d="M6 14l-2.5-2L6 10" />
         </svg>
       );
+    case "code-sparkle": {
+      // AI coding sessions — rounded square with `</>` glyph and a four-point
+      // sparkle at the top-right. Painted with a violet→pink gradient so the
+      // tab stands out as the "AI" surface.
+      const gradId = `atlas-cs-${reactId}`;
+      return (
+        <svg {...p} stroke={`url(#${gradId})`}>
+          <defs>
+            <linearGradient
+              id={gradId}
+              x1="0"
+              y1="0"
+              x2="16"
+              y2="16"
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0%" stopColor="#a855f7" />
+              <stop offset="55%" stopColor="#6366f1" />
+              <stop offset="100%" stopColor="#ec4899" />
+            </linearGradient>
+          </defs>
+          {/* rounded square frame, opens at the top-right where the sparkle sits */}
+          <path d="M2.5 5a2 2 0 012-2H9" />
+          <path d="M2.5 11.5V5" />
+          <path d="M2.5 11.5a2 2 0 002 2h7a2 2 0 002-2V8.5" />
+          {/* `</>` glyph */}
+          <path d="M6 7l-1.5 1.5L6 10" />
+          <path d="M10 7l1.5 1.5L10 10" />
+          <path d="M8.5 6.5l-1 4" />
+          {/* four-point sparkle, top-right */}
+          <path
+            d="M13 1.5l0.6 1.4 1.4 0.6-1.4 0.6-0.6 1.4-0.6-1.4-1.4-0.6 1.4-0.6z"
+            fill={`url(#${gradId})`}
+            stroke="none"
+          />
+        </svg>
+      );
+    }
     default:
       return (
         <svg {...p}>

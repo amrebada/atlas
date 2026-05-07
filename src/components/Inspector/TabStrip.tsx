@@ -12,7 +12,7 @@ interface TabSpec {
 const TABS: TabSpec[] = [
   { id: "overview", icon: "sparkle", label: "Overview" },
   { id: "files", icon: "file", label: "Files" },
-  { id: "sessions", icon: "term", label: "Sessions" },
+  { id: "sessions", icon: "code-sparkle", label: "Sessions" },
   { id: "scripts", icon: "play", label: "Scripts" },
   { id: "todos", icon: "check", label: "Todos" },
   { id: "milestones", icon: "flag", label: "Milestones" },

@@ -14,6 +14,7 @@ mod git;
 mod ics_builder;
 mod metrics;
 mod path_bootstrap;
+pub mod providers;
 mod routine_engine;
 mod score_engine;
 mod scripts;
@@ -24,6 +25,7 @@ mod tray;
 mod util;
 mod watcher;
 
+use providers::ProvidersRegistry;
 use sessions::SessionsManager;
 use std::sync::Arc;
 use storage::sync::SyncWorker;
@@ -110,7 +112,9 @@ pub fn run() {
 
             app.manage(db);
             app.manage(watcher);
-            app.manage(Arc::new(SessionsManager::new()));
+            let registry = Arc::new(ProvidersRegistry::with_defaults());
+            app.manage(Arc::clone(&registry));
+            app.manage(Arc::new(SessionsManager::new(registry)));
             app.manage(ctx);
             app.manage(terminal);
             app.manage(sync_worker);
@@ -185,6 +189,8 @@ pub fn run() {
             commands::todos::todos_toggle,
             commands::sessions::sessions_list,
             commands::sessions::sessions_resume_info,
+            commands::providers::providers_list,
+            commands::providers::providers_new_invocation,
             commands::notes::notes_list,
             commands::notes::notes_get,
             commands::notes::notes_upsert,

@@ -16,12 +16,14 @@ import {
   detectEditors,
   discoverProjects,
   getSettings,
+  listProviders,
   listTemplates,
   listWatchers,
   removeTemplate,
   removeWatcher,
   setSettings,
   upsertTemplate,
+  type ProviderInfo,
 } from "../../ipc";
 import { useUiStore } from "../../state/store";
 import type { SettingsSection } from "../../state/store";
@@ -49,6 +51,7 @@ const SECTIONS: Array<{
 }> = [
   { id: "general", icon: "gear", label: "General" },
   { id: "editors", icon: "code", label: "Editors" },
+  { id: "providers", icon: "sparkle", label: "AI providers" },
   { id: "git", icon: "git", label: "Git" },
   { id: "watchers", icon: "folder", label: "Folder watchers" },
   { id: "templates", icon: "plus", label: "Templates" },
@@ -179,6 +182,7 @@ export function SettingsPanel() {
         >
           {section === "general" && <GeneralSection settings={settings} />}
           {section === "editors" && <EditorsSection settings={settings} />}
+          {section === "providers" && <ProvidersSection settings={settings} />}
           {section === "git" && <GitSection settings={settings} />}
           {section === "watchers" && <WatchersSection />}
           {section === "templates" && <TemplatesSection />}
@@ -405,6 +409,167 @@ function EditorsSection({ settings }: { settings?: Settings }) {
                 Make default
               </button>
             )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProvidersSection({ settings }: { settings?: Settings }) {
+  const queryClient = useQueryClient();
+  const pushToast = useUiStore((s) => s.pushToast);
+
+  const { data: providers = [] } = useQuery<ProviderInfo[]>({
+    queryKey: ["providers"],
+    queryFn: listProviders,
+    retry: false,
+    // refetch when settings change so the toggle/default badges stay in sync
+    enabled: settings != null,
+  });
+
+  const persisted = settings?.providers;
+
+  const mutate = useMutation({
+    mutationFn: (patch: Partial<Settings["providers"]>) =>
+      setSettings({
+        providers: { ...(persisted ?? {}), ...patch },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: ["providers"] });
+    },
+    onError: (err) => pushToast("error", `Save failed: ${String(err)}`),
+  });
+
+  const enabledMap = persisted?.enabled ?? {};
+  const defaultId = persisted?.defaultId ?? "claude";
+
+  const toggle = (id: string, on: boolean) =>
+    mutate.mutate({
+      enabled: { ...enabledMap, [id]: on },
+    });
+
+  const setDefault = (id: string) => {
+    mutate.mutate({ defaultId: id });
+  };
+
+  return (
+    <div>
+      <SectionHdr>AI providers</SectionHdr>
+      <div
+        style={{
+          fontSize: 11,
+          color: "var(--text-dim)",
+          marginBottom: 12,
+        }}
+      >
+        Toggle which CLI agents Atlas surfaces in the Sessions tab. The
+        default is used by the <code style={CODE_STYLE}>+ new session</code>{" "}
+        button.
+      </div>
+      {providers.length === 0 && (
+        <div
+          style={{
+            fontSize: 11,
+            fontFamily: "var(--mono)",
+            color: "var(--text-dimmer)",
+            padding: "10px 0",
+          }}
+        >
+          No providers registered yet.
+        </div>
+      )}
+      {providers.map((p) => {
+        const enabled = enabledMap[p.id] ?? true;
+        const isDefault = defaultId === p.id;
+        return (
+          <div
+            key={p.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 0",
+              borderBottom: "1px solid var(--line-soft)",
+            }}
+          >
+            <Icon
+              name="sparkle"
+              size={14}
+              stroke={
+                p.available ? "var(--accent)" : "var(--text-dimmer)"
+              }
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 13,
+                    color: "var(--text)",
+                  }}
+                >
+                  {p.label}
+                </span>
+                {!p.available && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontFamily: "var(--mono)",
+                      color: "var(--warn, #d97757)",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                      padding: "1px 5px",
+                      border: "1px solid var(--warn, #d97757)",
+                      borderRadius: 2,
+                    }}
+                  >
+                    not installed
+                  </span>
+                )}
+                {isDefault && enabled && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontFamily: "var(--mono)",
+                      color: "var(--accent)",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    default
+                  </span>
+                )}
+              </div>
+              <code
+                style={{
+                  ...CODE_STYLE,
+                  display: "inline-block",
+                  marginTop: 2,
+                }}
+                title={`Binary on PATH: ${p.binaryName}`}
+              >
+                {p.binaryName}
+              </code>
+            </div>
+            {!isDefault && enabled && p.available && (
+              <button
+                style={GHOST_BTN}
+                onClick={() => setDefault(p.id)}
+              >
+                Make default
+              </button>
+            )}
+            <Toggle
+              on={enabled}
+              onChange={(v) => toggle(p.id, v)}
+            />
           </div>
         );
       })}

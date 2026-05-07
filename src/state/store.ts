@@ -149,6 +149,7 @@ export type SettingsSection =
   | "templates"
   | "shortcuts"
   | "advanced"
+  | "providers"
   | "about";
 
 export const useUiStore = create<UiState>((set) => ({

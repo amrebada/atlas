@@ -1,6 +1,6 @@
 [package]
 name = "atlas"
-version = "1.0.10"
+version = "1.0.11"
 description = "Desktop-native command hub for local git projects"
 authors = ["Amr Ebada"]
 license = "MIT"
@@ -58,6 +58,12 @@ sqlx = { version = "0.8", features = [
     "migrate",
     "chrono",
 ] }
+
+# Synchronous SQLite read access for third-party tool databases (e.g.
+# OpenCode CLI's `~/.local/share/opencode/opencode.db`). `bundled` ships a
+# matching libsqlite so the build doesn't depend on whatever sqlite version
+# is installed on the host.
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Filesystem watching (P2)
 notify = "6"
