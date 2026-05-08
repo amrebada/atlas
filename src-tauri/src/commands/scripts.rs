@@ -29,13 +29,8 @@ pub async fn scripts_list(state: State<'_, Db>, project_id: String) -> Result<Ve
         .scripts_list(&project_id)
         .await
         .map_err(|e: anyhow::Error| e.to_string())?;
-    if !stored.is_empty() {
-        return Ok(stored);
-    }
-
-    // No stored scripts yet - try to derive from sources on disk.
     let parsed = scripts::discover_scripts(&project_path).map_err(|e| e.to_string())?;
-    Ok(parsed)
+    Ok(merge_scripts(stored, parsed))
 }
 
 /// `scripts.upsert` - insert or replace a script row by `Script::id`.
@@ -74,18 +69,15 @@ pub async fn scripts_run(
 ) -> Result<Vec<String>, String> {
     let project_path = resolve_project_path(&state, &project_id).await?;
 
-    // Resolve script ids → Script rows. Prefer the stored set so the user's
+    // Resolve script ids → Script rows. Stored entries override discovered
+    // ones by id so user edits to auto-detected scripts are honored.
     let stored = state
         .scripts_list(&project_id)
         .await
         .map_err(|e: anyhow::Error| e.to_string())?;
-    let parsed = if stored.is_empty() {
-        scripts::discover_scripts(&project_path).map_err(|e| e.to_string())?
-    } else {
-        Vec::new()
-    };
+    let parsed = scripts::discover_scripts(&project_path).map_err(|e| e.to_string())?;
+    let pool = merge_scripts(stored, parsed);
 
-    let pool: Vec<&Script> = stored.iter().chain(parsed.iter()).collect();
     let mut invocation_ids = Vec::with_capacity(script_ids.len());
     for sid in &script_ids {
         let script = pool
@@ -121,13 +113,9 @@ pub async fn scripts_run_with_env(
         .scripts_list(&project_id)
         .await
         .map_err(|e: anyhow::Error| e.to_string())?;
-    let parsed = if stored.is_empty() {
-        scripts::discover_scripts(&project_path).map_err(|e| e.to_string())?
-    } else {
-        Vec::new()
-    };
+    let parsed = scripts::discover_scripts(&project_path).map_err(|e| e.to_string())?;
+    let pool = merge_scripts(stored, parsed);
 
-    let pool: Vec<&Script> = stored.iter().chain(parsed.iter()).collect();
     let mut invocation_ids = Vec::with_capacity(invocations.len());
     for inv in &invocations {
         let script = pool
@@ -141,6 +129,19 @@ pub async fn scripts_run_with_env(
     }
 
     Ok(invocation_ids)
+}
+
+/// Merge stored scripts with auto-discovered ones. Stored entries take
+/// precedence by id (so a user's edits to an auto-detected script stick),
+/// and discovered scripts not present in `stored` are appended after.
+fn merge_scripts(stored: Vec<Script>, parsed: Vec<Script>) -> Vec<Script> {
+    let mut out = stored;
+    for s in parsed {
+        if !out.iter().any(|existing| existing.id == s.id) {
+            out.push(s);
+        }
+    }
+    out
 }
 
 /// Resolve a project id to its absolute path on disk. Bubbles a friendly
