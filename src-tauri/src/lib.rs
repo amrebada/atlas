@@ -6,6 +6,7 @@
 use tauri::Manager;
 use tracing_subscriber::EnvFilter;
 
+mod agent;
 mod commands;
 mod crash;
 mod editors;
@@ -136,6 +137,11 @@ pub fn run() {
                 approvals,
                 app.handle().clone(),
             );
+
+            // Phase 4.0a: outbound agent that pipes commands from a relay
+            // backend into the MCP server (eventually). Off by default;
+            // opted-in via ATLAS_AGENT_ENABLED + ATLAS_AGENT_TOKEN.
+            agent::maybe_spawn(app.handle().clone());
 
             // P9 - apply persisted "launch at login" + "menu bar agent"
             let persisted = tauri::async_runtime::block_on(
