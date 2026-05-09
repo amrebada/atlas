@@ -507,6 +507,75 @@ fn tool_descriptors() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "atlas_archive_project",
+            "description": "Archive (hide) or restore a project. \
+                            MUTATING — requires a scoped_token from approval_request_plan.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Project id." },
+                    "archived": { "type": "boolean", "description": "True to archive, false to restore." },
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["id", "archived", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_rename_project",
+            "description": "Change a project's display name. Doesn't touch the on-disk folder. \
+                            MUTATING — requires a scoped_token from approval_request_plan.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Project id." },
+                    "name": { "type": "string", "description": "New display name." },
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["id", "name", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_set_project_tags",
+            "description": "Replace a project's full tag list (not append — pass the complete \
+                            desired set). MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Project id." },
+                    "tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Full replacement tag list."
+                    },
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["id", "tags", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_run_script",
+            "description": "Run a stored or auto-discovered script in a new terminal pane on \
+                            the project. Returns the invocation/pane id; output streams to the \
+                            terminal pane (and to anyone listening on `script:output:<id>`). \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": { "type": "string" },
+                    "script_id": {
+                        "type": "string",
+                        "description": "Id from atlas_list_scripts. Use that tool first to discover ids."
+                    },
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["project_id", "script_id", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -526,6 +595,10 @@ async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, Stri
         "atlas_list_scripts" => list_scripts(&state.db, &args).await,
         "approval_request_plan" => request_plan(state, &args).await,
         "atlas_pin_project" => pin_project(state, &args).await,
+        "atlas_archive_project" => archive_project(state, &args).await,
+        "atlas_rename_project" => rename_project(state, &args).await,
+        "atlas_set_project_tags" => set_project_tags(state, &args).await,
+        "atlas_run_script" => run_script(state, &args).await,
         other => Err((ERR_METHOD_NOT_FOUND, format!("unknown tool: {other}"))),
     }
 }
@@ -546,6 +619,16 @@ fn require_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, (i32, String)>
     args.get(key)
         .and_then(Value::as_str)
         .ok_or((ERR_INVALID_PARAMS, format!("missing {key}")))
+}
+
+/// Validate a `scoped_token` argument and bubble up the matching JSON-RPC
+/// error. Every mutating tool starts with this.
+fn require_approval(state: &McpState, args: &Value) -> Result<(), (i32, String)> {
+    let token = require_str(args, "scoped_token")?;
+    state
+        .approvals
+        .validate(token)
+        .map_err(|e| (ERR_INVALID_PARAMS, e))
 }
 
 async fn list_projects(db: &Db, args: &Value) -> Result<Value, (i32, String)> {
@@ -664,12 +747,7 @@ async fn request_plan(state: &McpState, args: &Value) -> Result<Value, (i32, Str
 }
 
 async fn pin_project(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    let scoped_token = require_str(args, "scoped_token")?;
-    state
-        .approvals
-        .validate(scoped_token)
-        .map_err(|e| (ERR_INVALID_PARAMS, e))?;
-
+    require_approval(state, args)?;
     let id = require_str(args, "id")?;
     let pinned = args
         .get("pinned")
@@ -682,11 +760,122 @@ async fn pin_project(state: &McpState, args: &Value) -> Result<Value, (i32, Stri
         .await
         .map_err(|e| (ERR_INTERNAL, format!("pin_project failed: {e}")))?;
 
-    // Fire the same event the in-app `projects_pin` command would have, so
-    // the React cache merges the change without waiting for a restart.
+    // Emit the same event the in-app command path emits so the React cache
+    // merges the change without an app restart. Same pattern for every
+    // mutating tool below.
     let _ = crate::events::emit_project_updated(&state.app, id, json!({ "pinned": pinned }));
 
     ok_text(&json!({ "id": id, "pinned": pinned }))
+}
+
+async fn archive_project(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+    let id = require_str(args, "id")?;
+    let archived = args
+        .get("archived")
+        .and_then(Value::as_bool)
+        .ok_or((ERR_INVALID_PARAMS, "missing archived (boolean)".into()))?;
+
+    state
+        .db
+        .archive_project(id, archived)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("archive_project failed: {e}")))?;
+
+    let _ = crate::events::emit_project_updated(&state.app, id, json!({ "archived": archived }));
+    ok_text(&json!({ "id": id, "archived": archived }))
+}
+
+async fn rename_project(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+    let id = require_str(args, "id")?;
+    let name = require_str(args, "name")?;
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err((ERR_INVALID_PARAMS, "name cannot be empty".into()));
+    }
+
+    state
+        .db
+        .rename_project(id, trimmed)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("rename_project failed: {e}")))?;
+
+    let _ = crate::events::emit_project_updated(&state.app, id, json!({ "name": trimmed }));
+    ok_text(&json!({ "id": id, "name": trimmed }))
+}
+
+async fn set_project_tags(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+    let id = require_str(args, "id")?;
+    let tags: Vec<String> = args
+        .get("tags")
+        .and_then(Value::as_array)
+        .ok_or((ERR_INVALID_PARAMS, "missing tags (array)".into()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+
+    state
+        .db
+        .set_tags(id, &tags)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("set_tags failed: {e}")))?;
+
+    let _ = crate::events::emit_project_updated(&state.app, id, json!({ "tags": tags }));
+    ok_text(&json!({ "id": id, "tags": tags }))
+}
+
+async fn run_script(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+    let project_id = require_str(args, "project_id")?;
+    let script_id = require_str(args, "script_id")?;
+
+    let project = state
+        .db
+        .get_project(project_id)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("get_project failed: {e}")))?
+        .ok_or((
+            ERR_INVALID_PARAMS,
+            format!("project not found: {project_id}"),
+        ))?;
+    let project_path = PathBuf::from(&project.path);
+
+    // Same merge logic the in-app `scripts_run` command uses: stored entries
+    // win over auto-discovered ones by id.
+    let stored = state
+        .db
+        .scripts_list(project_id)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("scripts_list failed: {e}")))?;
+    let parsed = crate::scripts::discover_scripts(&project_path)
+        .map_err(|e| (ERR_INTERNAL, format!("discover_scripts failed: {e}")))?;
+    let script = stored
+        .iter()
+        .chain(parsed.iter().filter(|p| !stored.iter().any(|s| s.id == p.id)))
+        .find(|s| s.id == script_id)
+        .ok_or((
+            ERR_INVALID_PARAMS,
+            format!("unknown script id: {script_id}"),
+        ))?;
+
+    let env: Vec<(String, String)> = script
+        .env_defaults
+        .iter()
+        .map(|v| (v.key.clone(), v.default.clone()))
+        .collect();
+
+    let invocation_id = crate::scripts::run(&state.app, project_id, script, &project_path, env)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("scripts::run failed: {e}")))?;
+
+    ok_text(&json!({
+        "invocationId": invocation_id,
+        "projectId": project_id,
+        "scriptId": script_id,
+        "scriptName": script.name,
+    }))
 }
 
 /// Constant-time byte comparison so an attacker on the loopback can't
