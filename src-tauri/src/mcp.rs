@@ -657,6 +657,31 @@ fn tool_descriptors() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "atlas_list_screens",
+            "description": "List connected displays with frame, visibleFrame, and backing scale. \
+                            macOS only. Read-only, no approval needed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_list_windows",
+            "description": "List visible windows by owner app, title, pid, and bounds. macOS \
+                            only. Uses System Events / AppleScript, so requires Accessibility \
+                            permission for the Atlas binary. \
+                            CAVEAT: on macOS 26+, many third-party apps (Chrome, VSCode, …) hide \
+                            their AX trees from System Events. Those windows won't appear here \
+                            until Atlas ships a SCShareableContent-based Swift sidecar. Apps that \
+                            allow AX inspection (Atlas, Terminal, Finder, Apple apps) work today.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -685,6 +710,8 @@ async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, Stri
         "atlas_git_commit" => git_commit(state, &args).await,
         "atlas_git_push" => git_push(state, &args).await,
         "atlas_take_screenshot" => take_screenshot(state, &args).await,
+        "atlas_list_screens" => list_screens(&args).await,
+        "atlas_list_windows" => list_windows(&args).await,
         other => Err((ERR_METHOD_NOT_FOUND, format!("unknown tool: {other}"))),
     }
 }
@@ -1155,6 +1182,120 @@ fn current_branch(cwd: &std::path::Path) -> Option<String> {
     let repo = git2::Repository::open(cwd).ok()?;
     let head = repo.head().ok()?;
     head.shorthand().map(str::to_string)
+}
+
+/// Run a JXA snippet via osascript and parse stdout as JSON. JXA is the
+/// JavaScript-for-Automation flavor of osascript — it can call ObjC/CG
+/// APIs directly via the bridge, which lets us use `CGWindowListCopyWindowInfo`
+/// and `NSScreen.screens` without adding a Rust FFI crate.
+#[cfg(target_os = "macos")]
+async fn run_jxa(script: &str) -> Result<Value, (i32, String)> {
+    let output = tokio::process::Command::new("osascript")
+        .args(["-l", "JavaScript", "-e", script])
+        .output()
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("spawn osascript: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err((ERR_INTERNAL, format!("osascript failed: {stderr}")));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(stdout.trim())
+        .map_err(|e| (ERR_INTERNAL, format!("parse JXA output: {e} — got: {stdout}")))
+}
+
+async fn list_screens(_args: &Value) -> Result<Value, (i32, String)> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err((ERR_INTERNAL, "atlas_list_screens is currently macOS-only".into()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let script = r#"
+ObjC.import("AppKit");
+var arr = $.NSScreen.screens;
+var out = [];
+for (var i = 0; i < arr.count; i++) {
+    var s = arr.objectAtIndex(i);
+    var f = s.frame;
+    var vf = s.visibleFrame;
+    out.push({
+        index: i,
+        primary: i === 0,
+        frame: { x: f.origin.x, y: f.origin.y, width: f.size.width, height: f.size.height },
+        visibleFrame: { x: vf.origin.x, y: vf.origin.y, width: vf.size.width, height: vf.size.height },
+        backingScaleFactor: s.backingScaleFactor
+    });
+}
+JSON.stringify(out);
+"#;
+        let screens = run_jxa(script).await?;
+        ok_text(&screens)
+    }
+}
+
+async fn list_windows(args: &Value) -> Result<Value, (i32, String)> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = args;
+        return Err((ERR_INTERNAL, "atlas_list_windows is currently macOS-only".into()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = args;
+        // History note: this used `CGWindowListCopyWindowInfo`, which on
+        // macOS 26+ returns nil for unprivileged callers (Apple gated the
+        // unentitled path; the modern replacement is ScreenCaptureKit's
+        // `SCShareableContent`, but JXA can't import that framework). The
+        // remaining cross-version-friendly option is the AppleScript
+        // System Events bridge — same data, but it requires *Accessibility*
+        // permission (System Settings → Privacy & Security → Accessibility,
+        // toggle on for Atlas / target/debug/atlas).
+        let script = r#"
+var se = Application("System Events");
+var procs = se.processes.whose({ visible: true })();
+var out = [];
+for (var i = 0; i < procs.length; i++) {
+  var p = procs[i];
+  var procName, procPid;
+  try { procName = p.name(); } catch (e) { continue; }
+  try { procPid = p.unixId(); } catch (e) { procPid = 0; }
+  var ws;
+  try { ws = p.windows(); } catch (e) { continue; }
+  for (var j = 0; j < ws.length; j++) {
+    var w = ws[j];
+    try {
+      var pos = null, size = null, name = "";
+      try { name = w.name() || ""; } catch (e) {}
+      try { pos = w.position(); } catch (e) {}
+      try { size = w.size(); } catch (e) {}
+      out.push({
+        owner: procName,
+        pid: procPid,
+        name: name,
+        bounds: (pos && size) ? { x: pos[0], y: pos[1], width: size[0], height: size[1] } : null
+      });
+    } catch (e) {}
+  }
+}
+JSON.stringify(out);
+"#;
+        let windows = run_jxa(script).await.map_err(|e| {
+            // Make the permission failure obvious instead of a generic JSON
+            // parse error — this is the most likely reason it fails.
+            if e.1.contains("not allowed") || e.1.contains("assistive access") {
+                (ERR_INTERNAL, format!(
+                    "{}\n\nAtlas needs Accessibility permission. Open System Settings → \
+                     Privacy & Security → Accessibility and toggle on the Atlas binary \
+                     (or `target/debug/atlas` for dev builds), then quit and relaunch Atlas.",
+                    e.1
+                ))
+            } else {
+                e
+            }
+        })?;
+        ok_text(&windows)
+    }
 }
 
 async fn take_screenshot(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
