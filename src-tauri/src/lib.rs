@@ -12,6 +12,7 @@ mod editors;
 mod events;
 mod git;
 mod ics_builder;
+mod mcp;
 mod metrics;
 mod path_bootstrap;
 pub mod providers;
@@ -109,6 +110,10 @@ pub fn run() {
 
             // drift between `.atlas/*.json` mtime and DB `updated_at`,
             let sync_worker = SyncWorker::spawn(db.clone());
+
+            // Spawn the embedded MCP server (remote-control feature).
+            // Phase 1: env-var gated, default-off; see `mcp::maybe_spawn`.
+            mcp::maybe_spawn(db.clone());
 
             app.manage(db);
             app.manage(watcher);

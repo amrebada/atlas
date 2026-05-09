@@ -1,6 +1,6 @@
 [package]
 name = "atlas"
-version = "1.0.12"
+version = "1.0.13"
 description = "Desktop-native command hub for local git projects"
 authors = ["Amr Ebada"]
 license = "MIT"
@@ -107,6 +107,10 @@ uuid = { version = "1", features = ["v4", "serde"] }
 ts-rs = "10"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
+
+# Embedded HTTP server for the MCP endpoint (remote-control feature).
+# Loopback only, env-var gated; default-off so Atlas behavior is unchanged.
+axum = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
