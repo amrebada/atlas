@@ -71,11 +71,36 @@ comes back through the relay. Then send the actual `atlas_pin_project`
 call with that token and `step_index: 0` and watch Atlas's sidebar
 update live.
 
+## Wire format
+
+Every agent → relay message now carries an ed25519 signature (Phase 4.1):
+
+```json
+{
+  "type": "hello",
+  "agent_version": "1.0.X",
+  "os": "macos",
+  "device_id": "a1b2c3d4e5f6a7b8",
+  "public_key": "<64-char hex of ed25519 pubkey>",
+  "nonce": "<uuid>",
+  "signed_at": 1234567890,
+  "sig": "<128-char hex of ed25519 signature>"
+}
+```
+
+The signature covers the canonical JSON serialization of every other
+field (sig itself excluded). `serde_json::Map` sorts keys
+alphabetically, so the bytes are reproducible.
+
+The stub doesn't verify yet — that's Phase 7. But you'll see the new
+fields in `<- agent:` logs, and a real relay can verify each message
+against the device's registered pubkey from the QR-pairing handshake.
+
 ## Not yet
 
 This is a stub. The production relay (Phase 7) will:
 
-- Verify per-device auth (ed25519 + nonce, not bearer)
+- Verify ed25519 signatures on every inbound message (Phase 4.1 wire format)
 - Route messages by device id between mobile and desktop
 - Buffer for offline desktops
 - Handle push notifications (APNs / FCM)

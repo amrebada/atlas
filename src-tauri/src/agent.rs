@@ -18,10 +18,10 @@
 //! event bus. Real envelope shape will be defined alongside the relay
 //! design — Phase 4.0c.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use ed25519_dalek::{Signer, SigningKey};
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio_tungstenite::tungstenite::{
@@ -29,6 +29,7 @@ use tokio_tungstenite::tungstenite::{
     protocol::{frame::coding::CloseCode, CloseFrame},
     Message,
 };
+use uuid::Uuid;
 
 pub(crate) mod keys {
     //! Persistent ed25519 keypair for device pairing.
@@ -157,17 +158,41 @@ async fn connect_loop(app: AppHandle, url: String, token: String) {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum OutboundMessage<'a> {
-    /// Sent immediately on connect so the relay can register this agent
-    /// and reject unknown / unauthorized devices.
-    Hello {
-        agent_version: &'a str,
-        os: &'a str,
-        device_id: &'a str,
-        public_key: &'a str,
-    },
+/// Add `nonce`, `signed_at`, and `sig` fields to a JSON object envelope.
+///
+/// The signature covers the canonical JSON serialization of the envelope
+/// after `nonce` and `signed_at` are added but before `sig` itself —
+/// `serde_json::Map` is a BTreeMap by default, so keys are alphabetical
+/// and the bytes are reproducible across platforms.
+///
+/// Phase 4.1: this is the foundation for the production relay verifying
+/// every agent → relay message against the device's registered public
+/// key (no more static bearer trust). The relay stub doesn't verify yet,
+/// but the wire format is now in its final shape.
+fn sign_and_serialize(signing: &SigningKey, mut value: Value) -> anyhow::Result<String> {
+    let map = match &mut value {
+        Value::Object(m) => m,
+        _ => return Err(anyhow::anyhow!("envelope must be a JSON object")),
+    };
+    let nonce = Uuid::new_v4().to_string();
+    let signed_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    map.insert("nonce".into(), json!(nonce));
+    map.insert("signed_at".into(), json!(signed_at));
+
+    let canonical = serde_json::to_vec(&value)?;
+    let sig = signing.sign(&canonical);
+    let sig_hex: String = sig
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
+    if let Value::Object(map) = &mut value {
+        map.insert("sig".into(), json!(sig_hex));
+    }
+    Ok(serde_json::to_string(&value)?)
 }
 
 async fn connect_once(app: &AppHandle, url: &str, token: &str) -> anyhow::Result<()> {
@@ -207,13 +232,16 @@ async fn connect_once(app: &AppHandle, url: &str, token: &str) -> anyhow::Result
     let device_id = keys::fingerprint(&verifying);
     let public_key = keys::public_key_hex(&verifying);
 
-    let hello = OutboundMessage::Hello {
-        agent_version: env!("CARGO_PKG_VERSION"),
-        os: std::env::consts::OS,
-        device_id: &device_id,
-        public_key: &public_key,
-    };
-    let hello_json = serde_json::to_string(&hello)?;
+    let hello_json = sign_and_serialize(
+        &signing,
+        json!({
+            "type": "hello",
+            "agent_version": env!("CARGO_PKG_VERSION"),
+            "os": std::env::consts::OS,
+            "device_id": device_id,
+            "public_key": public_key,
+        }),
+    )?;
     ws.send(Message::Text(hello_json.into())).await?;
 
     let http = reqwest::Client::builder()
@@ -226,7 +254,7 @@ async fn connect_once(app: &AppHandle, url: &str, token: &str) -> anyhow::Result
                 let s = text.as_str();
                 tracing::info!(text = %s, "agent received text message");
                 let _ = app.emit("agent:message", json!({ "text": s }));
-                if let Some(reply) = handle_text(app, &http, s).await {
+                if let Some(reply) = handle_text(app, &http, &signing, s).await {
                     if let Err(e) = ws.send(Message::Text(reply.into())).await {
                         tracing::warn!(error = %e, "agent: send reply failed");
                         break;
@@ -257,9 +285,14 @@ async fn connect_once(app: &AppHandle, url: &str, token: &str) -> anyhow::Result
 }
 
 /// Try to decode an inbound text frame as an envelope and produce a reply.
-/// Returns `None` for envelopes that don't need a reply (unknown types,
-/// malformed JSON, etc — those are already logged via the emit above).
-async fn handle_text(app: &AppHandle, http: &reqwest::Client, text: &str) -> Option<String> {
+/// All replies go through `sign_and_serialize` so they carry nonce +
+/// signed_at + sig before leaving the agent.
+async fn handle_text(
+    app: &AppHandle,
+    http: &reqwest::Client,
+    signing: &SigningKey,
+    text: &str,
+) -> Option<String> {
     let envelope: Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(e) => {
@@ -270,8 +303,6 @@ async fn handle_text(app: &AppHandle, http: &reqwest::Client, text: &str) -> Opt
 
     let envelope_type = envelope.get("type").and_then(Value::as_str);
     if envelope_type != Some("rpc") {
-        // Future types: "ping", "approval", etc. For now non-rpc envelopes
-        // are silently dropped — the UI already saw them via agent:message.
         return None;
     }
 
@@ -280,6 +311,7 @@ async fn handle_text(app: &AppHandle, http: &reqwest::Client, text: &str) -> Opt
         Some(r) => r.clone(),
         None => {
             return Some(error_reply(
+                signing,
                 &env_id,
                 "envelope missing `request` field (the JSON-RPC payload)",
             ));
@@ -292,18 +324,23 @@ async fn handle_text(app: &AppHandle, http: &reqwest::Client, text: &str) -> Opt
     let app_data = match app.path().app_data_dir() {
         Ok(p) => p.join("atlas"),
         Err(e) => {
-            return Some(error_reply(&env_id, &format!("resolve app_data_dir: {e}")));
+            return Some(error_reply(
+                signing,
+                &env_id,
+                &format!("resolve app_data_dir: {e}"),
+            ));
         }
     };
     let settings = match crate::storage::settings::load(&app_data).await {
         Ok(s) => s,
         Err(e) => {
-            return Some(error_reply(&env_id, &format!("load settings: {e}")));
+            return Some(error_reply(signing, &env_id, &format!("load settings: {e}")));
         }
     };
     let mcp = settings.advanced.mcp;
     if !mcp.enabled || mcp.token.is_empty() {
         return Some(error_reply(
+            signing,
             &env_id,
             "MCP server is not enabled — toggle on in Settings → Advanced and restart Atlas",
         ));
@@ -318,13 +355,20 @@ async fn handle_text(app: &AppHandle, http: &reqwest::Client, text: &str) -> Opt
         .await
     {
         Ok(r) => r,
-        Err(e) => return Some(error_reply(&env_id, &format!("MCP HTTP call failed: {e}"))),
+        Err(e) => {
+            return Some(error_reply(
+                signing,
+                &env_id,
+                &format!("MCP HTTP call failed: {e}"),
+            ));
+        }
     };
 
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         return Some(error_reply(
+            signing,
             &env_id,
             &format!("MCP returned {status}: {body}"),
         ));
@@ -333,29 +377,36 @@ async fn handle_text(app: &AppHandle, http: &reqwest::Client, text: &str) -> Opt
         Ok(v) => v,
         Err(e) => {
             return Some(error_reply(
+                signing,
                 &env_id,
                 &format!("MCP non-JSON response: {e}"),
             ));
         }
     };
 
-    let reply = json!({
-        "type": "rpc",
-        "id": env_id,
-        "response": body,
-    });
-    serde_json::to_string(&reply).ok()
+    sign_and_serialize(
+        signing,
+        json!({
+            "type": "rpc",
+            "id": env_id,
+            "response": body,
+        }),
+    )
+    .ok()
 }
 
-fn error_reply(env_id: &Value, message: &str) -> String {
-    serde_json::to_string(&json!({
-        "type": "rpc",
-        "id": env_id,
-        "response": {
-            "jsonrpc": "2.0",
-            "id": null,
-            "error": { "code": -32603, "message": message }
-        }
-    }))
+fn error_reply(signing: &SigningKey, env_id: &Value, message: &str) -> String {
+    sign_and_serialize(
+        signing,
+        json!({
+            "type": "rpc",
+            "id": env_id,
+            "response": {
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": { "code": -32603, "message": message }
+            }
+        }),
+    )
     .unwrap_or_else(|_| "{}".into())
 }
