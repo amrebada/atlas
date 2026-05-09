@@ -280,6 +280,25 @@ export type MilestoneStatus = "planned" | "active" | "done" | "missed" | "cancel
 
 export type Note = { id: string, title: string, body: string, pinned: boolean, createdAt: string, updatedAt: string, };
 
+export type PairEnvelope = { 
+/**
+ * Where the mobile should POST the envelope (`<relay_base>/pair`).
+ * Derived from the agent settings — production deployments override
+ * this from Settings → Atlas Agent.
+ */
+relayBaseUrl: string, 
+/**
+ * JSON string of the signed pair envelope. Mobile sends this
+ * verbatim as the request body. Re-encoding would break the
+ * signature (canonical-JSON byte equality matters).
+ */
+envelopeJson: string, 
+/**
+ * Convenience copy of the device id from inside the envelope, so
+ * the UI can show it without re-parsing.
+ */
+deviceId: string, };
+
 export type PairingInfo = { 
 /**
  * Short, displayable fingerprint (first 8 bytes of pubkey, hex).

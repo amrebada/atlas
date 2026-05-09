@@ -206,7 +206,7 @@ async fn connect_loop(app: AppHandle, url: String, token: String) {
 /// every agent → relay message against the device's registered public
 /// key (no more static bearer trust). The relay stub doesn't verify yet,
 /// but the wire format is now in its final shape.
-fn sign_and_serialize(signing: &SigningKey, mut value: Value) -> anyhow::Result<String> {
+pub(crate) fn sign_and_serialize(signing: &SigningKey, mut value: Value) -> anyhow::Result<String> {
     let map = match &mut value {
         Value::Object(m) => m,
         _ => return Err(anyhow::anyhow!("envelope must be a JSON object")),

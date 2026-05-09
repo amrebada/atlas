@@ -288,6 +288,7 @@ pub fn run() {
             commands::ics::ics_reveal_dir,
             commands::mcp::mcp_approval_resolve,
             commands::agent::agent_pairing_info,
+            commands::agent::agent_pair_envelope,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Atlas");

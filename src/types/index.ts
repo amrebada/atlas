@@ -332,6 +332,15 @@ export interface PairingInfo {
   defaultRelayUrl: string;
 }
 
+export interface PairEnvelope {
+  /** Where the mobile should POST the envelope (`<relay_base>/pair`). */
+  relayBaseUrl: string;
+  /** JSON string of the signed pair envelope. Mobile sends verbatim. */
+  envelopeJson: string;
+  /** Convenience copy of the device id for UI display. */
+  deviceId: string;
+}
+
 export interface ProvidersSettings {
   /** Per-provider enable flag. Missing entries default to `true`. */
   enabled: Record<string, boolean>;

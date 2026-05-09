@@ -13,6 +13,7 @@ import { Icon } from "../../components/Icon";
 import atlasIconUrl from "../../assets/atlas-icon.png";
 import {
   addWatcher,
+  agentPairEnvelope,
   agentPairingInfo,
   detectEditors,
   discoverProjects,
@@ -1581,21 +1582,44 @@ function AgentPairingCard() {
     retry: false,
   });
 
-  if (!pairing) return null;
-
-  const qrPayload = JSON.stringify({
-    deviceId: pairing.deviceId,
-    publicKey: pairing.publicKey,
-    relayUrl: pairing.defaultRelayUrl,
+  // Pre-fetch the envelope and keep it fresh — `clipboard.writeText`
+  // must be called synchronously inside the click handler to keep
+  // user-activation alive (any preceding `await` revokes the implicit
+  // permission and the writeText rejects). 30s refetchInterval keeps
+  // the envelope inside the relay's 60s freshness window without
+  // making the IPC hot.
+  const { data: pairEnv } = useQuery({
+    queryKey: ["agent", "pair-envelope"],
+    queryFn: agentPairEnvelope,
+    staleTime: 0,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 
-  const copyJson = async () => {
-    try {
-      await navigator.clipboard.writeText(qrPayload);
-      pushToast("success", "Pairing JSON copied");
-    } catch (err) {
-      pushToast("error", `Copy failed: ${String(err)}`);
+  if (!pairing) return null;
+
+  // Mobile sends `envelopeJson` verbatim to `${relayBaseUrl}/pair`.
+  // Re-encoding the envelope would break canonical-JSON byte equality
+  // and the signature wouldn't verify.
+  const qrPayload = pairEnv
+    ? JSON.stringify({
+        relayBaseUrl: pairEnv.relayBaseUrl,
+        envelopeJson: pairEnv.envelopeJson,
+      })
+    : "";
+
+  const copyJson = () => {
+    if (!pairEnv) {
+      pushToast("error", "Pair envelope not ready — try again in a second");
+      return;
     }
+    // Synchronous launch keeps user-activation; await the result purely
+    // for the toast feedback.
+    navigator.clipboard
+      .writeText(qrPayload)
+      .then(() => pushToast("success", "Pairing JSON copied"))
+      .catch((err) => pushToast("error", `Copy failed: ${String(err)}`));
   };
 
   return (
@@ -1632,19 +1656,26 @@ function AgentPairingCard() {
       </SettingsRow>
       <SettingsRow
         label="Pair a device"
-        hint="Scan from the Atlas mobile app. Don't share this code publicly."
+        hint="Signed pair envelope refreshes every 30s while open. Don't share publicly."
       >
         <div style={{ display: "flex", gap: 6 }}>
           <button onClick={() => setShowQr(true)} style={GHOST_BTN}>
             Show QR
           </button>
-          <button onClick={copyJson} style={GHOST_BTN}>
+          <button
+            onClick={copyJson}
+            style={GHOST_BTN}
+            disabled={!pairEnv}
+          >
             Copy JSON
           </button>
         </div>
       </SettingsRow>
       {showQr && (
-        <PairingQrModal payload={qrPayload} onClose={() => setShowQr(false)} />
+        <PairingQrModal
+          payload={qrPayload}
+          onClose={() => setShowQr(false)}
+        />
       )}
     </>
   );

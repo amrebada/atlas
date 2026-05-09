@@ -664,6 +664,12 @@ export const systemDiskUsage = () =>
 export const resolveMcpApproval = (id: string, approve: boolean) =>
   invoke<void>("mcp_approval_resolve", { id, approve });
 
-import type { PairingInfo } from "../types";
+import type { PairingInfo, PairEnvelope } from "../types";
 export const agentPairingInfo = () =>
   invoke<PairingInfo>("agent_pairing_info");
+
+/** Build a freshly-signed pair envelope for QR display. The envelope
+ *  is good for ~60s before the relay rejects it for staleness — call
+ *  this each time the QR modal opens (and ideally on a refresh tick). */
+export const agentPairEnvelope = () =>
+  invoke<PairEnvelope>("agent_pair_envelope");
