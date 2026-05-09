@@ -6,6 +6,7 @@ pub mod editors;
 pub mod files;
 pub mod git;
 pub mod ics;
+pub mod mcp;
 pub mod milestones;
 pub mod notes;
 pub mod palette;

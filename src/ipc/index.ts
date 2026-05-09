@@ -659,3 +659,7 @@ export interface SystemDiskUsage {
 
 export const systemDiskUsage = () =>
   invoke<SystemDiskUsage>("system_disk_usage");
+
+// ── MCP remote-control feature ─────────────────────────────────────────
+export const resolveMcpApproval = (id: string, approve: boolean) =>
+  invoke<void>("mcp_approval_resolve", { id, approve });

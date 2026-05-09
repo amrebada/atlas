@@ -15,8 +15,12 @@
 //! messages. Streaming SSE responses aren't needed yet — every method we
 //! support returns synchronously.
 //!
-//! When mutating tools land (Phase 2) this file will split into
-//! `protocol.rs`, `server.rs`, and `tools/`.
+//! Approval model (Phase 2): mutating tools require a `scoped_token` issued
+//! by `approval_request_plan`. The server emits a `mcp:approval:request`
+//! Tauri event and waits up to 120s for the user to click Approve/Reject in
+//! the in-app dialog. Once approved, the token is valid for any number of
+//! mutating calls within a 60s window — matches the user's preference for
+//! batched approvals over per-action prompts.
 
 use crate::sessions::SessionsManager;
 use crate::storage::{types::ProjectFilter, Db};
@@ -29,9 +33,14 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter};
+use tokio::sync::oneshot;
+use uuid::Uuid;
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 const SERVER_NAME: &str = "atlas-mcp";
@@ -43,12 +52,23 @@ struct McpState {
     sessions: Arc<SessionsManager>,
     app_data_dir: PathBuf,
     bearer_token: String,
+    approvals: Arc<ApprovalRegistry>,
+    /// Used by mutating tools to emit the same `project:updated` /
+    /// `git:status` events the in-app commands emit, so the React cache
+    /// stays in sync without an app restart.
+    app: AppHandle,
 }
 
 /// Start the MCP server on a background task if the user has opted in.
 /// Silent no-op when disabled. Reads `settings.advanced.mcp` and lets env
 /// vars override individual fields (see module docs).
-pub fn maybe_spawn(db: Db, sessions: Arc<SessionsManager>, app_data_dir: PathBuf) {
+pub fn maybe_spawn(
+    db: Db,
+    sessions: Arc<SessionsManager>,
+    app_data_dir: PathBuf,
+    approvals: Arc<ApprovalRegistry>,
+    app: AppHandle,
+) {
     let resolved = resolve_config(&app_data_dir);
     let Some(cfg) = resolved else {
         return;
@@ -59,6 +79,8 @@ pub fn maybe_spawn(db: Db, sessions: Arc<SessionsManager>, app_data_dir: PathBuf
         sessions,
         app_data_dir,
         bearer_token: cfg.token,
+        approvals,
+        app,
     };
     let addr = SocketAddr::from(([127, 0, 0, 1], cfg.port));
 
@@ -116,6 +138,121 @@ fn resolve_config(app_data_dir: &PathBuf) -> Option<ResolvedConfig> {
     }
 
     Some(ResolvedConfig { port, token })
+}
+
+// ---------- Approval registry ----------
+
+const APPROVAL_REQUEST_TIMEOUT_SECS: u64 = 120;
+const SCOPED_TOKEN_TTL_SECS: u64 = 60;
+
+/// Bridges the MCP server (which runs in tokio tasks under axum) and the
+/// Tauri command layer (which runs the user's Approve/Reject click). The
+/// MCP server inserts a oneshot sender keyed by request id, emits a
+/// `mcp:approval:request` event, and awaits the receiver. The Tauri
+/// command resolves the matching entry.
+pub struct ApprovalRegistry {
+    pending: Mutex<HashMap<Uuid, oneshot::Sender<bool>>>,
+    approved: Mutex<HashMap<String, ApprovedToken>>,
+    app: AppHandle,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ApprovedToken {
+    expires_at: Instant,
+}
+
+impl ApprovalRegistry {
+    pub fn new(app: AppHandle) -> Arc<Self> {
+        Arc::new(Self {
+            pending: Mutex::new(HashMap::new()),
+            approved: Mutex::new(HashMap::new()),
+            app,
+        })
+    }
+
+    /// Open a new approval request and await the user's decision. Returns
+    /// the issued scoped token on approve, or an error string on reject /
+    /// timeout / cancellation. The summary is sent verbatim to the UI.
+    async fn request(&self, summary: &str) -> Result<String, String> {
+        let id = Uuid::new_v4();
+        let (tx, rx) = oneshot::channel::<bool>();
+        self.pending.lock().unwrap().insert(id, tx);
+
+        let _ = self.app.emit(
+            "mcp:approval:request",
+            serde_json::json!({
+                "id": id.to_string(),
+                "summary": summary,
+                "ttlSeconds": APPROVAL_REQUEST_TIMEOUT_SECS,
+            }),
+        );
+
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(APPROVAL_REQUEST_TIMEOUT_SECS), rx).await;
+
+        // Always remove the pending entry — by this point the receiver is
+        // either complete, cancelled, or its sender has been dropped.
+        self.pending.lock().unwrap().remove(&id);
+
+        let approved = match outcome {
+            Ok(Ok(v)) => v,
+            Ok(Err(_)) => return Err("approval request was cancelled".into()),
+            Err(_) => {
+                let _ = self.app.emit(
+                    "mcp:approval:cancelled",
+                    serde_json::json!({ "id": id.to_string() }),
+                );
+                return Err("approval timed out".into());
+            }
+        };
+
+        if !approved {
+            return Err("rejected by user".into());
+        }
+
+        let token = format!("appr_{}", Uuid::new_v4().simple());
+        self.approved.lock().unwrap().insert(
+            token.clone(),
+            ApprovedToken {
+                expires_at: Instant::now() + Duration::from_secs(SCOPED_TOKEN_TTL_SECS),
+            },
+        );
+        Ok(token)
+    }
+
+    /// Called from the Tauri `mcp_approval_resolve` command. Returns an
+    /// error if the request id doesn't match a pending entry (e.g. it
+    /// already timed out, or the user double-clicked).
+    pub fn resolve(&self, id: Uuid, approve: bool) -> Result<(), String> {
+        let tx = self
+            .pending
+            .lock()
+            .unwrap()
+            .remove(&id)
+            .ok_or_else(|| "no such pending approval".to_string())?;
+        // If send fails the receiver is gone (already cleaned up). Either
+        // way the outcome is the same: no waiter to notify.
+        let _ = tx.send(approve);
+        Ok(())
+    }
+
+    /// Validate that `token` is approved and unexpired. Used by mutating
+    /// tools as a precondition. Multi-use within the TTL window — Phase
+    /// 2.1 will tighten this with per-step signatures.
+    fn validate(&self, token: &str) -> Result<(), String> {
+        let mut approved = self.approved.lock().unwrap();
+        // Drop expired entries opportunistically.
+        let now = Instant::now();
+        approved.retain(|_, t| t.expires_at > now);
+
+        let entry = approved
+            .get(token)
+            .ok_or_else(|| "invalid or expired scoped_token".to_string())?;
+        if now > entry.expires_at {
+            return Err("scoped_token expired".into());
+        }
+        Ok(())
+    }
 }
 
 // ---------- JSON-RPC envelope ----------
@@ -332,6 +469,44 @@ fn tool_descriptors() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "approval_request_plan",
+            "description": "Ask the user to approve a batch of upcoming mutating actions. \
+                            Pass a clear human-readable summary describing every step (e.g. \
+                            \"Pin 'atlas' and 'notaty', archive 'old-experiment', then run \
+                            'lint' on each\"). Returns a scoped_token valid for 60 seconds; \
+                            pass it as the `scoped_token` argument to mutating tools. \
+                            On reject or 120s timeout this tool errors — re-plan and ask again.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Plain-English summary of what will happen. Shown verbatim to the user."
+                    }
+                },
+                "required": ["summary"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_pin_project",
+            "description": "Pin or unpin a project in the sidebar. \
+                            MUTATING — requires a scoped_token from approval_request_plan.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Project id." },
+                    "pinned": { "type": "boolean", "description": "True to pin, false to unpin." },
+                    "scoped_token": {
+                        "type": "string",
+                        "description": "Approval token from approval_request_plan."
+                    }
+                },
+                "required": ["id", "pinned", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -349,6 +524,8 @@ async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, Stri
         "atlas_list_recents" => list_recents(&state.db, &args).await,
         "atlas_list_sessions" => list_sessions(state, &args).await,
         "atlas_list_scripts" => list_scripts(&state.db, &args).await,
+        "approval_request_plan" => request_plan(state, &args).await,
+        "atlas_pin_project" => pin_project(state, &args).await,
         other => Err((ERR_METHOD_NOT_FOUND, format!("unknown tool: {other}"))),
     }
 }
@@ -461,6 +638,55 @@ async fn list_scripts(db: &Db, args: &Value) -> Result<Value, (i32, String)> {
         .await
         .map_err(|e| (ERR_INTERNAL, format!("scripts_list failed: {e}")))?;
     ok_text(&scripts)
+}
+
+async fn request_plan(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    let summary = require_str(args, "summary")?;
+    let token = state
+        .approvals
+        .request(summary)
+        .await
+        .map_err(|e| (ERR_INTERNAL, e))?;
+    Ok(json!({
+        "content": [{
+            "type": "text",
+            "text": format!(
+                "APPROVED. Use scoped_token={token} on mutating tools. \
+                 Valid for {SCOPED_TOKEN_TTL_SECS} seconds."
+            )
+        }],
+        "structuredContent": {
+            "scopedToken": token,
+            "ttlSeconds": SCOPED_TOKEN_TTL_SECS
+        },
+        "isError": false
+    }))
+}
+
+async fn pin_project(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    let scoped_token = require_str(args, "scoped_token")?;
+    state
+        .approvals
+        .validate(scoped_token)
+        .map_err(|e| (ERR_INVALID_PARAMS, e))?;
+
+    let id = require_str(args, "id")?;
+    let pinned = args
+        .get("pinned")
+        .and_then(Value::as_bool)
+        .ok_or((ERR_INVALID_PARAMS, "missing pinned (boolean)".into()))?;
+
+    state
+        .db
+        .pin_project(id, pinned)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("pin_project failed: {e}")))?;
+
+    // Fire the same event the in-app `projects_pin` command would have, so
+    // the React cache merges the change without waiting for a restart.
+    let _ = crate::events::emit_project_updated(&state.app, id, json!({ "pinned": pinned }));
+
+    ok_text(&json!({ "id": id, "pinned": pinned }))
 }
 
 /// Constant-time byte comparison so an attacker on the loopback can't

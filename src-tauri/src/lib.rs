@@ -121,9 +121,21 @@ pub fn run() {
             app.manage(terminal);
             app.manage(sync_worker);
 
+            // Approval registry — shared between the MCP server (which
+            // emits requests) and the Tauri command (which the UI calls
+            // when the user clicks Approve / Reject).
+            let approvals = mcp::ApprovalRegistry::new(app.handle().clone());
+            app.manage(Arc::clone(&approvals));
+
             // Spawn the embedded MCP server (remote-control feature).
             // Phase 1: env-var gated, default-off; see `mcp::maybe_spawn`.
-            mcp::maybe_spawn(db, sessions_mgr, app_data.clone());
+            mcp::maybe_spawn(
+                db,
+                sessions_mgr,
+                app_data.clone(),
+                approvals,
+                app.handle().clone(),
+            );
 
             // P9 - apply persisted "launch at login" + "menu bar agent"
             let persisted = tauri::async_runtime::block_on(
@@ -268,6 +280,7 @@ pub fn run() {
             commands::ics::ics_export_all,
             commands::ics::ics_export_project,
             commands::ics::ics_reveal_dir,
+            commands::mcp::mcp_approval_resolve,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Atlas");

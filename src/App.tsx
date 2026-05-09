@@ -14,6 +14,7 @@ import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { ContextMenu } from "./features/context-menu/ContextMenu";
 import { BulkActionBar } from "./features/multi-select/BulkActionBar";
 import { CheatSheetOverlay } from "./features/help/CheatSheetOverlay";
+import { McpApprovalDialog } from "./features/mcp/ApprovalDialog";
 import { TerminalStrip } from "./features/terminal/TerminalStrip";
 import { TodayView } from "./features/planner/TodayView";
 import { TimelineView } from "./features/planner/TimelineView";
@@ -272,6 +273,7 @@ function AppInner() {
       <ContextMenu projects={projects} />
       <BulkActionBar projects={projects} />
       <CheatSheetOverlay />
+      <McpApprovalDialog />
 
       {/* Planner: full-screen Today modal. The TitleBar's TodayBadge
           opens it; ⌘T toggles it. Renders `null` when closed. */}
