@@ -682,6 +682,35 @@ fn tool_descriptors() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "atlas_get_active_window",
+            "description": "Return the currently-frontmost window: owner app, pid, title, and \
+                            bounds. macOS only; same Accessibility caveat as atlas_list_windows. \
+                            Read-only.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_focus_window",
+            "description": "Bring the given app to the foreground. The app must already be \
+                            running — this tool focuses, it doesn't launch. macOS only. \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "owner": {
+                        "type": "string",
+                        "description": "App name as it appears in atlas_list_windows.owner (e.g. \"Safari\", \"Visual Studio Code\")."
+                    },
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["owner", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -712,6 +741,8 @@ async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, Stri
         "atlas_take_screenshot" => take_screenshot(state, &args).await,
         "atlas_list_screens" => list_screens(&args).await,
         "atlas_list_windows" => list_windows(&args).await,
+        "atlas_get_active_window" => get_active_window(&args).await,
+        "atlas_focus_window" => focus_window(state, &args).await,
         other => Err((ERR_METHOD_NOT_FOUND, format!("unknown tool: {other}"))),
     }
 }
@@ -1295,6 +1326,72 @@ JSON.stringify(out);
             }
         })?;
         ok_text(&windows)
+    }
+}
+
+async fn get_active_window(_args: &Value) -> Result<Value, (i32, String)> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err((ERR_INTERNAL, "atlas_get_active_window is currently macOS-only".into()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let script = r#"
+var se = Application("System Events");
+var procs = se.processes.whose({ frontmost: true })();
+if (procs.length === 0) {
+  JSON.stringify(null);
+} else {
+  var p = procs[0];
+  var info = { owner: p.name(), pid: p.unixId(), name: null, bounds: null };
+  try {
+    var ws = p.windows();
+    if (ws.length > 0) {
+      try { info.name = ws[0].name() || ""; } catch (e) {}
+      try {
+        var pos = ws[0].position();
+        var size = ws[0].size();
+        info.bounds = { x: pos[0], y: pos[1], width: size[0], height: size[1] };
+      } catch (e) {}
+    }
+  } catch (e) {}
+  JSON.stringify(info);
+}
+"#;
+        let active = run_jxa(script).await?;
+        ok_text(&active)
+    }
+}
+
+async fn focus_window(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+    let owner = require_str(args, "owner")?;
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = owner;
+        return Err((ERR_INTERNAL, "atlas_focus_window is currently macOS-only".into()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Inject the owner string safely as a JSON string literal so quotes /
+        // backslashes can't break out of the JXA expression.
+        let owner_literal = serde_json::to_string(owner)
+            .map_err(|e| (ERR_INTERNAL, format!("encode owner: {e}")))?;
+        let script = format!(
+            r#"
+var name = {owner_literal};
+var se = Application("System Events");
+var procs = se.processes.whose({{ name: name }})();
+if (procs.length === 0) {{
+  throw new Error("no running process named: " + name);
+}}
+var p = procs[0];
+p.frontmost = true;
+JSON.stringify({{ ok: true, owner: name, pid: p.unixId() }});
+"#
+        );
+        let result = run_jxa(&script).await?;
+        ok_text(&result)
     }
 }
 
