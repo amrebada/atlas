@@ -889,6 +889,47 @@ fn tool_descriptors() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "atlas_double_click",
+            "description": "Double-click at CG screen coordinates (same coordinate space as \
+                            atlas_click). Issues a single mouse-down/up pair with click state \
+                            set to 2, which macOS treats as a true double-click (not just two \
+                            clicks). Useful for opening files in Finder, selecting words, etc. \
+                            macOS only; same permissions as atlas_click. \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "x": { "type": "number" },
+                    "y": { "type": "number" },
+                    "button": { "type": "string", "enum": ["left", "right"], "default": "left" },
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
+                },
+                "required": ["x", "y", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_scroll",
+            "description": "Scroll the surface under the cursor. Sign convention matches user \
+                            intuition: positive dy = scroll DOWN (reveal content below), \
+                            positive dx = scroll RIGHT. Units are pixels by default (passed to \
+                            CGEventCreateScrollWheelEvent in pixel mode). macOS only; requires \
+                            Accessibility AND Input Monitoring. \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "dx": { "type": "number", "default": 0, "description": "Horizontal scroll in pixels (positive = right)." },
+                    "dy": { "type": "number", "default": 0, "description": "Vertical scroll in pixels (positive = down)." },
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
+                },
+                "required": ["scoped_token"],
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -910,6 +951,8 @@ const MUTATING_TOOLS: &[&str] = &[
     "atlas_type_text",
     "atlas_key_combo",
     "atlas_click",
+    "atlas_double_click",
+    "atlas_scroll",
 ];
 
 async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, String)> {
@@ -956,6 +999,8 @@ async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, Stri
         "atlas_type_text" => type_text(&args).await,
         "atlas_key_combo" => key_combo(&args).await,
         "atlas_click" => click(&args).await,
+        "atlas_double_click" => double_click(&args).await,
+        "atlas_scroll" => scroll(&args).await,
         other => Err((ERR_METHOD_NOT_FOUND, format!("unknown tool: {other}"))),
     }
 }
@@ -1777,6 +1822,78 @@ var loc = $.CGPointMake({x}, {y});
 $.CGEventPost(0, $.CGEventCreateMouseEvent($(), {down}, loc, 0));
 $.CGEventPost(0, $.CGEventCreateMouseEvent($(), {up}, loc, 0));
 JSON.stringify({{ ok: true, x: {x}, y: {y}, button: "{button}" }});
+"#
+        );
+        let result = run_jxa(&script).await?;
+        ok_text(&result)
+    }
+}
+
+async fn double_click(args: &Value) -> Result<Value, (i32, String)> {
+    let x = args
+        .get("x")
+        .and_then(Value::as_f64)
+        .ok_or((ERR_INVALID_PARAMS, "missing x".into()))?;
+    let y = args
+        .get("y")
+        .and_then(Value::as_f64)
+        .ok_or((ERR_INVALID_PARAMS, "missing y".into()))?;
+    let button = args.get("button").and_then(Value::as_str).unwrap_or("left");
+    if button != "left" && button != "right" {
+        return Err((ERR_INVALID_PARAMS, format!("unknown button: {button}")));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err((ERR_INTERNAL, "atlas_double_click is currently macOS-only".into()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let (down, up) = if button == "right" { (3, 4) } else { (1, 2) };
+        // kCGMouseEventClickState = 1; setting it to 2 makes macOS treat the
+        // event as a double-click rather than two independent clicks.
+        let script = format!(
+            r#"
+ObjC.import("CoreGraphics");
+var loc = $.CGPointMake({x}, {y});
+var d = $.CGEventCreateMouseEvent($(), {down}, loc, 0);
+var u = $.CGEventCreateMouseEvent($(), {up}, loc, 0);
+$.CGEventSetIntegerValueField(d, 1, 2);
+$.CGEventSetIntegerValueField(u, 1, 2);
+$.CGEventPost(0, d);
+$.CGEventPost(0, u);
+JSON.stringify({{ ok: true, x: {x}, y: {y}, button: "{button}" }});
+"#
+        );
+        let result = run_jxa(&script).await?;
+        ok_text(&result)
+    }
+}
+
+async fn scroll(args: &Value) -> Result<Value, (i32, String)> {
+    let dx = args.get("dx").and_then(Value::as_f64).unwrap_or(0.0);
+    let dy = args.get("dy").and_then(Value::as_f64).unwrap_or(0.0);
+    if dx == 0.0 && dy == 0.0 {
+        return Err((ERR_INVALID_PARAMS, "dx and dy are both 0".into()));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err((ERR_INTERNAL, "atlas_scroll is currently macOS-only".into()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // CG scroll convention is opposite of user intuition: positive wheel
+        // values scroll content "up" (revealing what's above). We accept the
+        // intuitive sign (positive dy = scroll down) and invert before posting.
+        let cg_dy = -dy;
+        let cg_dx = -dx;
+        let script = format!(
+            r#"
+ObjC.import("CoreGraphics");
+// CGEventCreateScrollWheelEvent(source, units, wheelCount, wheel1, wheel2)
+// units 0 = pixel, wheel1 = vertical, wheel2 = horizontal.
+var event = $.CGEventCreateScrollWheelEvent($(), 0, 2, {cg_dy}, {cg_dx});
+$.CGEventPost(0, event);
+JSON.stringify({{ ok: true, dx: {dx}, dy: {dy} }});
 "#
         );
         let result = run_jxa(&script).await?;
