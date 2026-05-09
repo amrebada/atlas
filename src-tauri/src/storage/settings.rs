@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use crate::storage::json::{read_json, write_json};
 use crate::storage::templates::builtin_templates;
 use crate::storage::types::{
-    AdvancedSettings, CloneDepth, EditorsSettings, FullLiteral, GeneralSettings, GitPollInterval,
-    GitSettings, McpSettings, ProvidersSettings, Settings, Template, Theme,
+    AdvancedSettings, AgentSettings, CloneDepth, EditorsSettings, FullLiteral, GeneralSettings,
+    GitPollInterval, GitSettings, McpSettings, ProvidersSettings, Settings, Template, Theme,
 };
 
 /// Filename inside `<app_data>/atlas/` - kept private so callers must go
@@ -87,6 +87,7 @@ pub fn default_settings() -> Settings {
             // Opt-in: user must toggle this on in Settings → Advanced
             crash_log: false,
             mcp: McpSettings::default(),
+            agent: AgentSettings::default(),
         },
         providers: ProvidersSettings::default(),
     }

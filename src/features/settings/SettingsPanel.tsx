@@ -30,6 +30,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useUiStore } from "../../state/store";
 import type { SettingsSection } from "../../state/store";
 import type {
+  AgentSettings,
   EditorEntry,
   Settings,
   Template,
@@ -1298,6 +1299,11 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
   const pushToast = useUiStore((s) => s.pushToast);
   const adv = settings?.advanced;
   const mcp = adv?.mcp ?? { enabled: false, port: 8765, token: "" };
+  const agent = adv?.agent ?? {
+    enabled: false,
+    relayUrl: "ws://localhost:9000/agent",
+    token: "",
+  };
 
   const mutation = useMutation({
     mutationFn: (patch: Partial<Settings["advanced"]>) =>
@@ -1308,6 +1314,7 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
           shell: adv?.shell ?? "/bin/zsh",
           crashLog: adv?.crashLog ?? false,
           mcp,
+          agent,
           ...patch,
         },
       }),
@@ -1458,6 +1465,14 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
         </>
       )}
 
+      <AgentSection
+        agent={agent}
+        onChange={(patch) =>
+          mutation.mutate({ agent: { ...agent, ...patch } })
+        }
+        pushToast={pushToast}
+      />
+
       <AgentPairingCard />
 
       <div style={{ marginTop: 22 }}>
@@ -1473,6 +1488,86 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
         </button>
       </div>
     </div>
+  );
+}
+
+function AgentSection({
+  agent,
+  onChange,
+  pushToast,
+}: {
+  agent: AgentSettings;
+  onChange: (patch: Partial<AgentSettings>) => void;
+  pushToast: (kind: "success" | "error", message: string) => void;
+}) {
+  const setEnabled = (on: boolean) => {
+    onChange({ enabled: on });
+    if (on) {
+      pushToast("success", "Restart Atlas to apply Atlas Agent changes.");
+    }
+  };
+
+  const copyToken = async () => {
+    if (!agent.token) return;
+    try {
+      await navigator.clipboard.writeText(agent.token);
+      pushToast("success", "Relay token copied");
+    } catch (err) {
+      pushToast("error", `Copy failed: ${String(err)}`);
+    }
+  };
+
+  return (
+    <>
+      <div
+        style={{
+          marginTop: 22,
+          marginBottom: 8,
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          color: "var(--text-dim)",
+        }}
+      >
+        Atlas Agent (relay connection)
+      </div>
+      <SettingsRow
+        label="Connect to relay"
+        hint="Outbound WebSocket to the relay backend. Restart required."
+      >
+        <Toggle on={agent.enabled} onChange={setEnabled} />
+      </SettingsRow>
+      {agent.enabled && (
+        <>
+          <SettingsRow
+            label="Relay URL"
+            hint="WebSocket endpoint. Use the local stub for dev."
+          >
+            <DebouncedInput
+              value={agent.relayUrl}
+              placeholder="ws://localhost:9000/agent"
+              onCommit={(relayUrl) => onChange({ relayUrl })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label="Bearer token"
+            hint="Sent in Authorization on the WS upgrade. Separate from device signing key."
+          >
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <DebouncedInput
+                value={agent.token}
+                placeholder="(none)"
+                onCommit={(token) => onChange({ token })}
+              />
+              <button onClick={copyToken} style={GHOST_BTN}>
+                Copy
+              </button>
+            </div>
+          </SettingsRow>
+        </>
+      )}
+    </>
   );
 }
 

@@ -118,24 +118,47 @@ const DEFAULT_RELAY_URL: &str = "ws://localhost:9000/agent";
 const RECONNECT_MIN: Duration = Duration::from_secs(1);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
 
-/// Spawn the agent if `ATLAS_AGENT_ENABLED=1` and a token is set.
-/// Silent no-op otherwise.
+/// Spawn the agent if it's enabled (either via `ATLAS_AGENT_ENABLED=1`
+/// for dev override, or via `settings.advanced.agent.enabled` from the
+/// Settings UI) and a token is configured. Silent no-op otherwise.
+///
+/// Env vars override settings per-field — useful when the dev wants to
+/// hit a custom relay without changing what's persisted in
+/// `settings.json`. To use the Settings UI exclusively, leave the env
+/// vars unset.
 pub fn maybe_spawn(app: AppHandle) {
-    if std::env::var("ATLAS_AGENT_ENABLED").as_deref() != Ok("1") {
-        return;
-    }
-    let url = std::env::var("ATLAS_AGENT_URL").unwrap_or_else(|_| DEFAULT_RELAY_URL.into());
-    let token = match std::env::var("ATLAS_AGENT_TOKEN") {
-        Ok(t) if !t.is_empty() => t,
-        _ => {
+    tauri::async_runtime::spawn(async move {
+        let app_data = match app.path().app_data_dir() {
+            Ok(p) => p.join("atlas"),
+            Err(e) => {
+                tracing::warn!(error = %e, "agent: resolve app_data_dir failed; not starting");
+                return;
+            }
+        };
+        let settings = crate::storage::settings::load(&app_data).await.ok();
+        let cfg = settings.map(|s| s.advanced.agent).unwrap_or_default();
+
+        let env_enabled = std::env::var("ATLAS_AGENT_ENABLED").as_deref() == Ok("1");
+        let enabled = env_enabled || cfg.enabled;
+        if !enabled {
+            return;
+        }
+
+        let url = std::env::var("ATLAS_AGENT_URL").unwrap_or_else(|_| {
+            if cfg.relay_url.is_empty() {
+                DEFAULT_RELAY_URL.into()
+            } else {
+                cfg.relay_url.clone()
+            }
+        });
+        let token = std::env::var("ATLAS_AGENT_TOKEN").unwrap_or_else(|_| cfg.token.clone());
+        if token.is_empty() {
             tracing::warn!(
-                "ATLAS_AGENT_ENABLED=1 but ATLAS_AGENT_TOKEN missing or empty; agent will not start"
+                "agent enabled but no token configured (Settings → Advanced → Atlas Agent, or ATLAS_AGENT_TOKEN); not starting"
             );
             return;
         }
-    };
 
-    tauri::async_runtime::spawn(async move {
         connect_loop(app, url, token).await;
     });
 }

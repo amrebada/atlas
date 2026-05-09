@@ -305,12 +305,21 @@ export interface AdvancedSettings {
   shell: string;
   crashLog: boolean;
   mcp: McpSettings;
+  agent: AgentSettings;
 }
 
 export interface McpSettings {
   enabled: boolean;
   port: number;
   /** Bearer token clients send in `Authorization: Bearer …`. Empty = server refuses to start. */
+  token: string;
+}
+
+export interface AgentSettings {
+  enabled: boolean;
+  /** WebSocket URL of the relay (defaults to local stub `ws://localhost:9000/agent`). */
+  relayUrl: string;
+  /** Bearer token presented on the WS upgrade. Separate from the device's signing key. */
   token: string;
 }
 

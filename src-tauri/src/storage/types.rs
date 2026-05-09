@@ -500,6 +500,11 @@ pub struct AdvancedSettings {
     /// loopback-only; the user opts in from Settings → Advanced.
     #[serde(default)]
     pub mcp: McpSettings,
+    /// Outbound agent that connects to the relay backend (remote-control
+    /// feature). Default-off; settings here are only used if no
+    /// `ATLAS_AGENT_*` env vars are set (env wins for dev override).
+    #[serde(default)]
+    pub agent: AgentSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -523,6 +528,36 @@ impl Default for McpSettings {
         Self {
             enabled: false,
             port: 8765,
+            token: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct AgentSettings {
+    pub enabled: bool,
+    /// WebSocket URL of the relay. Default points at the local stub for
+    /// dev (`ws://localhost:9000/agent`). Production relay URL ships
+    /// later; users can override per-device.
+    pub relay_url: String,
+    /// Bearer token presented to the relay on the WS upgrade. Separate
+    /// from the device's signing key — the token authenticates the
+    /// connection at the transport layer; signed envelopes authenticate
+    /// individual messages.
+    pub token: String,
+}
+
+impl Default for AgentSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            relay_url: "ws://localhost:9000/agent".into(),
             token: String::new(),
         }
     }
