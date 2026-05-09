@@ -240,6 +240,7 @@ version = "1.0.15"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "git2",
  "ignore",

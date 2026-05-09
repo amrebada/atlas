@@ -642,6 +642,21 @@ fn tool_descriptors() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "atlas_take_screenshot",
+            "description": "Capture the primary display and return the PNG as an MCP image \
+                            content block. macOS only; uses the built-in `screencapture` CLI. \
+                            Requires Screen Recording permission for the Atlas binary the first \
+                            time. Privacy-sensitive: requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["scoped_token"],
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -669,6 +684,7 @@ async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, Stri
         "atlas_open_session" => open_session(state, &args).await,
         "atlas_git_commit" => git_commit(state, &args).await,
         "atlas_git_push" => git_push(state, &args).await,
+        "atlas_take_screenshot" => take_screenshot(state, &args).await,
         other => Err((ERR_METHOD_NOT_FOUND, format!("unknown tool: {other}"))),
     }
 }
@@ -1139,6 +1155,55 @@ fn current_branch(cwd: &std::path::Path) -> Option<String> {
     let repo = git2::Repository::open(cwd).ok()?;
     let head = repo.head().ok()?;
     head.shorthand().map(str::to_string)
+}
+
+async fn take_screenshot(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err((
+            ERR_INTERNAL,
+            "atlas_take_screenshot is currently macOS-only".into(),
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use base64::Engine;
+        // Pipe `screencapture` directly to a temp file, then read+encode. The
+        // `-x` flag suppresses the camera-shutter sound and the screen flash
+        // so this stays unobtrusive for an AI-driven capture.
+        let path = std::env::temp_dir().join(format!("atlas-mcp-{}.png", Uuid::new_v4()));
+        let path_str = path.to_string_lossy().into_owned();
+
+        let status = tokio::process::Command::new("screencapture")
+            .args(["-x", "-t", "png", &path_str])
+            .status()
+            .await
+            .map_err(|e| (ERR_INTERNAL, format!("spawn screencapture: {e}")))?;
+        if !status.success() {
+            return Err((
+                ERR_INTERNAL,
+                format!("screencapture exited with {status}"),
+            ));
+        }
+
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|e| (ERR_INTERNAL, format!("read screenshot: {e}")))?;
+        let _ = tokio::fs::remove_file(&path).await;
+
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(json!({
+            "content": [{
+                "type": "image",
+                "data": encoded,
+                "mimeType": "image/png"
+            }],
+            "isError": false
+        }))
+    }
 }
 
 /// Constant-time byte comparison so an attacker on the loopback can't
