@@ -3,6 +3,7 @@
 pub mod collections;
 pub mod disk;
 pub mod editors;
+pub mod agent;
 pub mod files;
 pub mod git;
 pub mod ics;

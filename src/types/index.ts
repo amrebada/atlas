@@ -314,6 +314,15 @@ export interface McpSettings {
   token: string;
 }
 
+export interface PairingInfo {
+  /** Short, displayable fingerprint (first 8 bytes of pubkey, hex). */
+  deviceId: string;
+  /** Full ed25519 public key, hex-encoded (64 chars). */
+  publicKey: string;
+  /** Default relay URL — what the QR code suggests to the mobile app. */
+  defaultRelayUrl: string;
+}
+
 export interface ProvidersSettings {
   /** Per-provider enable flag. Missing entries default to `true`. */
   enabled: Record<string, boolean>;

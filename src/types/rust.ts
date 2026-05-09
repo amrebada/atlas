@@ -259,6 +259,20 @@ export type MilestoneStatus = "planned" | "active" | "done" | "missed" | "cancel
 
 export type Note = { id: string, title: string, body: string, pinned: boolean, createdAt: string, updatedAt: string, };
 
+export type PairingInfo = { 
+/**
+ * Short, displayable fingerprint (first 8 bytes of pubkey, hex).
+ */
+deviceId: string, 
+/**
+ * Full ed25519 public key, hex-encoded (64 chars).
+ */
+publicKey: string, 
+/**
+ * Default relay URL — what the QR code suggests to the mobile app.
+ */
+defaultRelayUrl: string, };
+
 export type PaletteItem = { "kind": "project", project: Project, score: number, } | { "kind": "recent", project: Project, } | { "kind": "note", projectId: string, noteId: string, title: string, snippet: string, score: number, } | { "kind": "milestone", projectId: string, projectName: string, milestoneId: string, title: string, deadline: string, priority: Priority, status: MilestoneStatus, score: number, } | { "kind": "routine", routineId: string, projectId: string | null, projectName: string | null, title: string, rrule: string, priority: Priority, score: number, } | { "kind": "action", id: string, label: string, hint: string, keys: Array<string>, };
 
 export type Pane = { id: string, kind: PaneKind, title: string, status: PaneStatus, cwd: string, branch: string | null, scriptId: string | null, sessionId: string | null, };

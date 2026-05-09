@@ -663,3 +663,7 @@ export const systemDiskUsage = () =>
 // ── MCP remote-control feature ─────────────────────────────────────────
 export const resolveMcpApproval = (id: string, approve: boolean) =>
   invoke<void>("mcp_approval_resolve", { id, approve });
+
+import type { PairingInfo } from "../types";
+export const agentPairingInfo = () =>
+  invoke<PairingInfo>("agent_pairing_info");

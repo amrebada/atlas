@@ -110,6 +110,9 @@ importers:
       prismjs:
         specifier: ^1.30.0
         version: 1.30.0
+      qrcode.react:
+        specifier: ^4.2.0
+        version: 4.2.0(react@19.2.5)
       react:
         specifier: ^19.1.0
         version: 19.2.5
@@ -1450,6 +1453,11 @@ packages:
   punycode.js@2.3.1:
     resolution: {integrity: sha512-uxFIHU0YlHYhDQtV4R9J6a52SLx28BCjT+4ieh7IGbgwVJWO+km431c4yRlREUAsAmt/uMjQUyQHNEPf0M39CA==}
     engines: {node: '>=6'}
+
+  qrcode.react@4.2.0:
+    resolution: {integrity: sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
@@ -2893,6 +2901,10 @@ snapshots:
       prosemirror-transform: 1.12.0
 
   punycode.js@2.3.1: {}
+
+  qrcode.react@4.2.0(react@19.2.5):
+    dependencies:
+      react: 19.2.5
 
   queue-microtask@1.2.3: {}
 

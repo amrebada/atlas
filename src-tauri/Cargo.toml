@@ -125,5 +125,10 @@ futures-util = "0.3"
 # transitively by tauri-plugin-updater; this just makes the dep explicit.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
+# Device-pairing keypair for atlas-agent (Phase 4.0c). 32-byte ed25519
+# private key persisted to $APP_DATA/atlas/agent_key with 0600 perms.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+
 [dev-dependencies]
 tempfile = "3"

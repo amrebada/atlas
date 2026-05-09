@@ -30,6 +30,75 @@ use tokio_tungstenite::tungstenite::{
     Message,
 };
 
+pub(crate) mod keys {
+    //! Persistent ed25519 keypair for device pairing.
+    //!
+    //! On first read the keypair is generated via OsRng and stored at
+    //! `$APP_DATA/atlas/agent_key` (32 raw bytes, 0600 perms on Unix).
+    //! Subsequent reads load the same key, so the device id stays stable
+    //! across Atlas restarts — pairing on the mobile side persists.
+    //!
+    //! The private bytes never leave the host. Only the public key + a
+    //! short fingerprint are exposed (via the `agent_pairing_info`
+    //! command), which is what the mobile app QR-scans to register.
+
+    use std::fs;
+    use std::io::Write;
+    use std::path::Path;
+
+    use ed25519_dalek::{SigningKey, VerifyingKey};
+    use rand::rngs::OsRng;
+
+    const KEY_FILE: &str = "agent_key";
+
+    pub fn load_or_generate(app_data_dir: &Path) -> anyhow::Result<SigningKey> {
+        let path = app_data_dir.join(KEY_FILE);
+        if let Ok(bytes) = fs::read(&path) {
+            if bytes.len() == 32 {
+                let arr: [u8; 32] = bytes.as_slice().try_into().unwrap();
+                return Ok(SigningKey::from_bytes(&arr));
+            }
+            tracing::warn!(
+                path = %path.display(),
+                len = bytes.len(),
+                "agent_key has unexpected size; regenerating"
+            );
+        }
+        fs::create_dir_all(app_data_dir)?;
+        let mut csprng = OsRng;
+        let key = SigningKey::generate(&mut csprng);
+
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&path)?;
+        f.write_all(&key.to_bytes())?;
+        tracing::info!(path = %path.display(), "agent keypair generated");
+        Ok(key)
+    }
+
+    /// Short, displayable fingerprint — the first 8 bytes of the public
+    /// key, hex-encoded. Stable across restarts for the same key.
+    pub fn fingerprint(verifying: &VerifyingKey) -> String {
+        verifying.as_bytes()[..8]
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect()
+    }
+
+    pub fn public_key_hex(verifying: &VerifyingKey) -> String {
+        verifying
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect()
+    }
+}
+
 const DEFAULT_RELAY_URL: &str = "ws://localhost:9000/agent";
 const RECONNECT_MIN: Duration = Duration::from_secs(1);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
@@ -92,11 +161,12 @@ async fn connect_loop(app: AppHandle, url: String, token: String) {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum OutboundMessage<'a> {
     /// Sent immediately on connect so the relay can register this agent
-    /// (and reject duplicates / unknown devices).
+    /// and reject unknown / unauthorized devices.
     Hello {
         agent_version: &'a str,
         os: &'a str,
-        // Future: device_id (ed25519 public key fingerprint), capabilities.
+        device_id: &'a str,
+        public_key: &'a str,
     },
 }
 
@@ -123,9 +193,25 @@ async fn connect_once(app: &AppHandle, url: &str, token: &str) -> anyhow::Result
         json!({ "state": "connected", "url": url }),
     );
 
+    // Resolve the device identity and announce ourselves. The relay sees
+    // public_key, not the bearer token — so a real production relay can
+    // verify signed messages from this agent against the pubkey it has
+    // on file from the pairing step.
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| anyhow::anyhow!("resolve app_data_dir: {e}"))?
+        .join("atlas");
+    let signing = keys::load_or_generate(&app_data)?;
+    let verifying = signing.verifying_key();
+    let device_id = keys::fingerprint(&verifying);
+    let public_key = keys::public_key_hex(&verifying);
+
     let hello = OutboundMessage::Hello {
         agent_version: env!("CARGO_PKG_VERSION"),
         os: std::env::consts::OS,
+        device_id: &device_id,
+        public_key: &public_key,
     };
     let hello_json = serde_json::to_string(&hello)?;
     ws.send(Message::Text(hello_json.into())).await?;

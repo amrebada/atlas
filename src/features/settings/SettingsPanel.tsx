@@ -13,6 +13,7 @@ import { Icon } from "../../components/Icon";
 import atlasIconUrl from "../../assets/atlas-icon.png";
 import {
   addWatcher,
+  agentPairingInfo,
   detectEditors,
   discoverProjects,
   getSettings,
@@ -25,6 +26,7 @@ import {
   upsertTemplate,
   type ProviderInfo,
 } from "../../ipc";
+import { QRCodeSVG } from "qrcode.react";
 import { useUiStore } from "../../state/store";
 import type { SettingsSection } from "../../state/store";
 import type {
@@ -1456,6 +1458,8 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
         </>
       )}
 
+      <AgentPairingCard />
+
       <div style={{ marginTop: 22 }}>
         <button
           onClick={resetAll}
@@ -1467,6 +1471,164 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
         >
           Reset all settings…
         </button>
+      </div>
+    </div>
+  );
+}
+
+function AgentPairingCard() {
+  const pushToast = useUiStore((s) => s.pushToast);
+  const [showQr, setShowQr] = useState(false);
+  const { data: pairing } = useQuery({
+    queryKey: ["agent", "pairing"],
+    queryFn: agentPairingInfo,
+    staleTime: Infinity,
+    retry: false,
+  });
+
+  if (!pairing) return null;
+
+  const qrPayload = JSON.stringify({
+    deviceId: pairing.deviceId,
+    publicKey: pairing.publicKey,
+    relayUrl: pairing.defaultRelayUrl,
+  });
+
+  const copyJson = async () => {
+    try {
+      await navigator.clipboard.writeText(qrPayload);
+      pushToast("success", "Pairing JSON copied");
+    } catch (err) {
+      pushToast("error", `Copy failed: ${String(err)}`);
+    }
+  };
+
+  return (
+    <>
+      <div
+        style={{
+          marginTop: 22,
+          marginBottom: 8,
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          color: "var(--text-dim)",
+        }}
+      >
+        Atlas Agent (mobile pairing)
+      </div>
+      <SettingsRow
+        label="Device ID"
+        hint="Stable across restarts. First 8 bytes of the agent's public key."
+      >
+        <code
+          style={{
+            fontSize: 12,
+            fontFamily: "var(--mono)",
+            background: "var(--surface-2)",
+            border: "1px solid var(--line)",
+            borderRadius: 5,
+            padding: "5px 8px",
+          }}
+        >
+          {pairing.deviceId}
+        </code>
+      </SettingsRow>
+      <SettingsRow
+        label="Pair a device"
+        hint="Scan from the Atlas mobile app. Don't share this code publicly."
+      >
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setShowQr(true)} style={GHOST_BTN}>
+            Show QR
+          </button>
+          <button onClick={copyJson} style={GHOST_BTN}>
+            Copy JSON
+          </button>
+        </div>
+      </SettingsRow>
+      {showQr && (
+        <PairingQrModal payload={qrPayload} onClose={() => setShowQr(false)} />
+      )}
+    </>
+  );
+}
+
+function PairingQrModal({
+  payload,
+  onClose,
+}: {
+  payload: string;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1100,
+      }}
+    >
+      <div
+        style={{
+          width: 380,
+          background: "var(--surface)",
+          border: "1px solid var(--line)",
+          borderRadius: 10,
+          padding: 22,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+          fontFamily: "var(--sans)",
+          color: "var(--text)",
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+            color: "var(--text-dim)",
+            marginBottom: 14,
+          }}
+        >
+          Pair this Atlas with your phone
+        </div>
+        <div
+          style={{
+            background: "white",
+            padding: 16,
+            borderRadius: 8,
+            display: "inline-block",
+          }}
+        >
+          <QRCodeSVG value={payload} size={280} level="M" />
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--text-dim)",
+            marginTop: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          The mobile app reads {`{deviceId, publicKey, relayUrl}`} from this
+          code and registers with the relay. Anyone with this QR can pair —
+          regenerate via Reset Pairing if it leaks.
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <button onClick={onClose} style={GHOST_BTN}>
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );

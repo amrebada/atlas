@@ -51,6 +51,7 @@
     "postcss": "^8.5.10",
     "prism-themes": "^1.9.0",
     "prismjs": "^1.30.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
     "react-diff-viewer-continued": "^4.2.2",
     "react-dom": "^19.1.0",
