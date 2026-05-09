@@ -23,13 +23,27 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ed25519_dalek::{Signer, SigningKey};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, EventId, Listener, Manager};
 use tokio_tungstenite::tungstenite::{
     client::IntoClientRequest,
     protocol::{frame::coding::CloseCode, CloseFrame},
     Message,
 };
 use uuid::Uuid;
+
+/// Atlas events the agent forwards to the relay as ambient notifications.
+/// `project:updated` and `git:status` are coalesced upstream by the
+/// watcher (debounce + 2s coalesce window per repo) so we don't have to
+/// rate-limit here. Discovery is one-shot per repo.
+///
+/// Excluded: `terminal:data:*` (too high frequency, not user-actionable),
+/// `discovery:progress` (internal), `toast` (already shown in-app).
+const WATCHER_BRIDGE_EVENTS: &[&str] = &[
+    "project:updated",
+    "project:discovered",
+    "project:removed",
+    "git:status",
+];
 
 pub(crate) mod keys {
     //! Persistent ed25519 keypair for device pairing.
@@ -248,40 +262,110 @@ async fn connect_once(app: &AppHandle, url: &str, token: &str) -> anyhow::Result
         .timeout(Duration::from_secs(60))
         .build()?;
 
-    while let Some(msg) = ws.next().await {
-        match msg? {
-            Message::Text(text) => {
-                let s = text.as_str();
-                tracing::info!(text = %s, "agent received text message");
-                let _ = app.emit("agent:message", json!({ "text": s }));
-                if let Some(reply) = handle_text(app, &http, &signing, s).await {
-                    if let Err(e) = ws.send(Message::Text(reply.into())).await {
-                        tracing::warn!(error = %e, "agent: send reply failed");
-                        break;
+    // Phase 8: bridge Atlas's Tauri event bus to the relay. Listeners
+    // run on Tauri's event thread and push (event_name, payload_json)
+    // tuples through an unbounded channel — no awaiting in the handler
+    // means we never block the event loop. The async task below
+    // `tokio::select!`s the channel against inbound WS frames.
+    let (events_tx, mut events_rx) =
+        tokio::sync::mpsc::unbounded_channel::<(String, String)>();
+    let listener_ids: Vec<EventId> = WATCHER_BRIDGE_EVENTS
+        .iter()
+        .map(|name| {
+            let tx = events_tx.clone();
+            let event_name = name.to_string();
+            app.listen(*name, move |event| {
+                let _ = tx.send((event_name.clone(), event.payload().to_string()));
+            })
+        })
+        .collect();
+
+    let result = run_session(app, &mut ws, &http, &signing, &mut events_rx).await;
+
+    // Always clean up listeners — without this they accumulate across
+    // reconnects and we'd leak a slot per disconnect.
+    for id in listener_ids {
+        app.unlisten(id);
+    }
+    result
+}
+
+/// The connected-session loop. Multiplexes inbound RPC frames against
+/// outbound watcher events, both signed via the device key on the way
+/// out.
+async fn run_session(
+    app: &AppHandle,
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    http: &reqwest::Client,
+    signing: &SigningKey,
+    events_rx: &mut tokio::sync::mpsc::UnboundedReceiver<(String, String)>,
+) -> anyhow::Result<()> {
+    loop {
+        tokio::select! {
+            msg = ws.next() => {
+                let Some(msg) = msg else { return Ok(()); };
+                match msg? {
+                    Message::Text(text) => {
+                        let s = text.as_str();
+                        tracing::info!(text = %s, "agent received text message");
+                        let _ = app.emit("agent:message", json!({ "text": s }));
+                        if let Some(reply) = handle_text(app, http, signing, s).await {
+                            if let Err(e) = ws.send(Message::Text(reply.into())).await {
+                                tracing::warn!(error = %e, "agent: send reply failed");
+                                return Ok(());
+                            }
+                        }
                     }
+                    Message::Binary(bytes) => {
+                        tracing::info!(bytes = bytes.len(), "agent received binary frame");
+                    }
+                    Message::Ping(payload) => {
+                        ws.send(Message::Pong(payload)).await?;
+                    }
+                    Message::Pong(_) => {}
+                    Message::Close(frame) => {
+                        tracing::info!(?frame, "relay sent close");
+                        let _ = ws
+                            .send(Message::Close(Some(CloseFrame {
+                                code: CloseCode::Normal,
+                                reason: "agent ack close".into(),
+                            })))
+                            .await;
+                        return Ok(());
+                    }
+                    Message::Frame(_) => {}
                 }
             }
-            Message::Binary(bytes) => {
-                tracing::info!(bytes = bytes.len(), "agent received binary frame");
+            Some((event_name, payload_json)) = events_rx.recv() => {
+                // Tauri emits payloads pre-serialized. Re-parse so the
+                // relay sees a structured object instead of a string-of-JSON;
+                // fall back to raw string if parse fails (defensive — every
+                // emitter we forward uses serde_json so this should never trip).
+                let payload: Value = serde_json::from_str(&payload_json)
+                    .unwrap_or(Value::String(payload_json));
+                let env_json = match sign_and_serialize(
+                    signing,
+                    json!({
+                        "type": "event",
+                        "event": event_name,
+                        "payload": payload,
+                    }),
+                ) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "agent: sign event envelope failed");
+                        continue;
+                    }
+                };
+                if let Err(e) = ws.send(Message::Text(env_json.into())).await {
+                    tracing::warn!(error = %e, "agent: forward event failed");
+                    return Ok(());
+                }
             }
-            Message::Ping(payload) => {
-                ws.send(Message::Pong(payload)).await?;
-            }
-            Message::Pong(_) => {}
-            Message::Close(frame) => {
-                tracing::info!(?frame, "relay sent close");
-                let _ = ws
-                    .send(Message::Close(Some(CloseFrame {
-                        code: CloseCode::Normal,
-                        reason: "agent ack close".into(),
-                    })))
-                    .await;
-                break;
-            }
-            Message::Frame(_) => {}
         }
     }
-    Ok(())
 }
 
 /// Try to decode an inbound text frame as an envelope and produce a reply.
