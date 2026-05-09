@@ -4,7 +4,12 @@ export type AdvancedSettings = { useSpotlight: boolean, crashReports: boolean, s
 /**
  * hook appends each panic payload + backtrace to
  */
-crashLog: boolean, };
+crashLog: boolean, 
+/**
+ * Embedded MCP server config (remote-control feature). Default-off,
+ * loopback-only; the user opts in from Settings → Advanced.
+ */
+mcp: McpSettings, };
 
 /**
  * A single row returned by `git_branch_list`.
@@ -211,6 +216,13 @@ export type Goal = { "kind": "count", target: number,
 completed: number, } | { "kind": "deadline", until: string, } | { "kind": "indefinite" };
 
 export type Lang = "TypeScript" | "JavaScript" | "Rust" | "Go" | "Python" | "Swift" | "Kotlin" | "Ruby" | "Java" | "C" | "C++" | "Other";
+
+export type McpSettings = { enabled: boolean, port: number, 
+/**
+ * Bearer token clients must send in `Authorization: Bearer …`.
+ * Empty string means the server refuses to start (no anonymous access).
+ */
+token: string, };
 
 /**
  * A milestone groups a set of todos under a single deadline within a

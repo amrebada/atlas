@@ -2,9 +2,14 @@
 //!
 //! Phase 1 of the remote-control feature: an HTTP+JSON-RPC endpoint on
 //! loopback that exposes a small set of read-only Atlas tools to a local
-//! AI CLI (Claude Code, Codex, etc.). Off by default — opted in via
-//! `ATLAS_MCP_ENABLED=1`. A bearer token (`ATLAS_MCP_TOKEN`) is required
-//! so other local processes can't reach it just by guessing the port.
+//! AI CLI (Claude Code, Codex, etc.). Off by default — the user opts in
+//! from Settings → Advanced. A bearer token is required, so other local
+//! processes can't reach it just by guessing the port.
+//!
+//! Config resolution order (each field individually):
+//! 1. Environment variable (`ATLAS_MCP_ENABLED`, `ATLAS_MCP_PORT`,
+//!    `ATLAS_MCP_TOKEN`) — convenient for `pnpm tauri dev`.
+//! 2. `settings.advanced.mcp` from `settings.json` — production path.
 //!
 //! Wire format: a single POST `/mcp` handler that dispatches JSON-RPC 2.0
 //! messages. Streaming SSE responses aren't needed yet — every method we
@@ -40,37 +45,22 @@ struct McpState {
     bearer_token: String,
 }
 
-/// Start the MCP server on a background task if the user has opted in via
-/// environment variables. Silent no-op otherwise.
-///
-/// Required: `ATLAS_MCP_ENABLED=1`, `ATLAS_MCP_TOKEN=<non-empty>`.
-/// Optional: `ATLAS_MCP_PORT` (default `8765`).
+/// Start the MCP server on a background task if the user has opted in.
+/// Silent no-op when disabled. Reads `settings.advanced.mcp` and lets env
+/// vars override individual fields (see module docs).
 pub fn maybe_spawn(db: Db, sessions: Arc<SessionsManager>, app_data_dir: PathBuf) {
-    if std::env::var("ATLAS_MCP_ENABLED").as_deref() != Ok("1") {
+    let resolved = resolve_config(&app_data_dir);
+    let Some(cfg) = resolved else {
         return;
-    }
-    let port: u16 = std::env::var("ATLAS_MCP_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8765);
-    let token = match std::env::var("ATLAS_MCP_TOKEN") {
-        Ok(t) if !t.is_empty() => t,
-        _ => {
-            tracing::warn!(
-                "ATLAS_MCP_ENABLED=1 but ATLAS_MCP_TOKEN is missing or empty; \
-                 refusing to start MCP server without auth"
-            );
-            return;
-        }
     };
 
     let state = McpState {
         db,
         sessions,
         app_data_dir,
-        bearer_token: token,
+        bearer_token: cfg.token,
     };
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from(([127, 0, 0, 1], cfg.port));
 
     tauri::async_runtime::spawn(async move {
         let app = Router::new().route("/mcp", post(handle)).with_state(state);
@@ -86,6 +76,46 @@ pub fn maybe_spawn(db: Db, sessions: Arc<SessionsManager>, app_data_dir: PathBuf
             }
         }
     });
+}
+
+struct ResolvedConfig {
+    port: u16,
+    token: String,
+}
+
+fn resolve_config(app_data_dir: &PathBuf) -> Option<ResolvedConfig> {
+    // Settings come from disk; env vars layered on top for dev convenience.
+    let settings = tauri::async_runtime::block_on(crate::storage::settings::load(app_data_dir))
+        .ok()
+        .map(|s| s.advanced.mcp)
+        .unwrap_or_default();
+
+    let env_enabled = std::env::var("ATLAS_MCP_ENABLED").as_deref() == Ok("1");
+    let enabled = env_enabled || settings.enabled;
+    if !enabled {
+        return None;
+    }
+
+    let port: u16 = std::env::var("ATLAS_MCP_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(if settings.port == 0 { 8765 } else { settings.port });
+
+    let token = std::env::var("ATLAS_MCP_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(settings.token);
+
+    if token.is_empty() {
+        tracing::warn!(
+            "MCP server is enabled but no bearer token is configured; \
+             refusing to start without auth. Set one in Settings → Advanced \
+             or via ATLAS_MCP_TOKEN."
+        );
+        return None;
+    }
+
+    Some(ResolvedConfig { port, token })
 }
 
 // ---------- JSON-RPC envelope ----------

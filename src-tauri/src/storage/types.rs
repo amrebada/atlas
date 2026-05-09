@@ -496,6 +496,36 @@ pub struct AdvancedSettings {
     /// hook appends each panic payload + backtrace to
     #[serde(default)]
     pub crash_log: bool,
+    /// Embedded MCP server config (remote-control feature). Default-off,
+    /// loopback-only; the user opts in from Settings → Advanced.
+    #[serde(default)]
+    pub mcp: McpSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct McpSettings {
+    pub enabled: bool,
+    #[ts(type = "number")]
+    pub port: u16,
+    /// Bearer token clients must send in `Authorization: Bearer …`.
+    /// Empty string means the server refuses to start (no anonymous access).
+    pub token: String,
+}
+
+impl Default for McpSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: 8765,
+            token: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

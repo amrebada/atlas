@@ -1295,6 +1295,7 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
   const queryClient = useQueryClient();
   const pushToast = useUiStore((s) => s.pushToast);
   const adv = settings?.advanced;
+  const mcp = adv?.mcp ?? { enabled: false, port: 8765, token: "" };
 
   const mutation = useMutation({
     mutationFn: (patch: Partial<Settings["advanced"]>) =>
@@ -1303,12 +1304,57 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
           useSpotlight: adv?.useSpotlight ?? false,
           crashReports: adv?.crashReports ?? false,
           shell: adv?.shell ?? "/bin/zsh",
+          crashLog: adv?.crashLog ?? false,
+          mcp,
           ...patch,
         },
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings"] }),
     onError: (err) => pushToast("error", `Save failed: ${String(err)}`),
   });
+
+  // mcp.token is generated on first enable so the user can immediately copy
+  // it into a Claude Code / Codex MCP config. Restart Atlas to apply.
+  const setMcp = (patch: Partial<typeof mcp>) =>
+    mutation.mutate({ mcp: { ...mcp, ...patch } });
+
+  const enableMcp = (on: boolean) => {
+    if (on && !mcp.token) {
+      const token =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID().replace(/-/g, "")
+          : Math.random().toString(36).slice(2) + Date.now().toString(36);
+      setMcp({ enabled: true, token });
+      pushToast(
+        "success",
+        "MCP server enabled — restart Atlas to apply. Token generated.",
+      );
+    } else {
+      setMcp({ enabled: on });
+      if (on) {
+        pushToast("success", "Restart Atlas to apply MCP server changes.");
+      }
+    }
+  };
+
+  const regenerateToken = () => {
+    const token =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID().replace(/-/g, "")
+        : Math.random().toString(36).slice(2) + Date.now().toString(36);
+    setMcp({ token });
+    pushToast("success", "New MCP token generated — restart Atlas to apply.");
+  };
+
+  const copyToken = async () => {
+    if (!mcp.token) return;
+    try {
+      await navigator.clipboard.writeText(mcp.token);
+      pushToast("success", "Token copied");
+    } catch (err) {
+      pushToast("error", `Copy failed: ${String(err)}`);
+    }
+  };
 
   const resetAll = () => {
     // Best-effort: we don't know the full shape, so patch with an empty
@@ -1343,6 +1389,73 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
           onCommit={(shell) => mutation.mutate({ shell })}
         />
       </SettingsRow>
+
+      <div
+        style={{
+          marginTop: 22,
+          marginBottom: 8,
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          color: "var(--text-dim)",
+        }}
+      >
+        Remote control (MCP)
+      </div>
+      <SettingsRow
+        label="Embedded MCP server"
+        hint="Loopback-only HTTP endpoint for local AI CLIs. Restart required."
+      >
+        <Toggle on={mcp.enabled} onChange={enableMcp} />
+      </SettingsRow>
+      {mcp.enabled && (
+        <>
+          <SettingsRow label="Port" hint="127.0.0.1 only">
+            <DebouncedInput
+              value={String(mcp.port || 8765)}
+              placeholder="8765"
+              onCommit={(v) => {
+                const n = parseInt(v, 10);
+                if (Number.isFinite(n) && n > 0 && n < 65536) {
+                  setMcp({ port: n });
+                }
+              }}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label="Bearer token"
+            hint="Paste this into your AI CLI's MCP config"
+          >
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <code
+                style={{
+                  fontSize: 11,
+                  fontFamily: "var(--mono)",
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--line)",
+                  borderRadius: 5,
+                  padding: "5px 8px",
+                  maxWidth: 260,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={mcp.token}
+              >
+                {mcp.token || "(none)"}
+              </code>
+              <button onClick={copyToken} style={GHOST_BTN}>
+                Copy
+              </button>
+              <button onClick={regenerateToken} style={GHOST_BTN}>
+                Regenerate
+              </button>
+            </div>
+          </SettingsRow>
+        </>
+      )}
+
       <div style={{ marginTop: 22 }}>
         <button
           onClick={resetAll}

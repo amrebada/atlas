@@ -303,6 +303,15 @@ export interface AdvancedSettings {
   useSpotlight: boolean;
   crashReports: boolean;
   shell: string;
+  crashLog: boolean;
+  mcp: McpSettings;
+}
+
+export interface McpSettings {
+  enabled: boolean;
+  port: number;
+  /** Bearer token clients send in `Authorization: Bearer …`. Empty = server refuses to start. */
+  token: string;
 }
 
 export interface ProvidersSettings {
