@@ -15,6 +15,11 @@ interface TerminalPaneProps {
 
 export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  // Refs let an external "refit" event reach this pane without
+  // tearing down the main setup useEffect.
+  const termRef = useRef<import("xterm").Terminal | null>(null);
+  const fitRef = useRef<import("xterm-addon-fit").FitAddon | null>(null);
+  const openedRef = useRef(false);
   const patchPaneStatus = useTerminalStore((s) => s.patchPaneStatus);
 
   useEffect(() => {
@@ -59,6 +64,8 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
       });
       fit = new FitAddon();
       term.loadAddon(fit);
+      termRef.current = term;
+      fitRef.current = fit;
 
       // Forward keystrokes to the PTY. Safe to register before open().
       term.onData((data) => {
@@ -75,6 +82,7 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
           fit.fit();
           terminalResize(pane.id, term.cols, term.rows).catch(() => {});
           opened = true;
+          openedRef.current = true;
           if (pendingChunks.length > 0) {
             for (const chunk of pendingChunks) term.write(chunk);
             pendingChunks.length = 0;
@@ -200,6 +208,9 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
       if (themeObs) themeObs.disconnect();
       if (dataUnlisten) dataUnlisten();
       if (exitUnlisten) exitUnlisten();
+      termRef.current = null;
+      fitRef.current = null;
+      openedRef.current = false;
       // xterm.js stores a WebGL/canvas context - disposing is mandatory.
       try {
         term?.dispose();
@@ -208,6 +219,42 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
       }
     };
   }, [pane.id, patchPaneStatus]);
+
+  // Strip-driven refit: when the strip is resized via the drag handle,
+  // group changes, or the OS window resizes, ResizeObserver inside a
+  // visibility:hidden + position:absolute subtree sometimes misses the
+  // delivery. Listen for an explicit broadcast from TerminalStrip and
+  // run fit + IPC + scrollToBottom unconditionally.
+  useEffect(() => {
+    const handler = () => {
+      const term = termRef.current;
+      const fit = fitRef.current;
+      if (!openedRef.current || !term || !fit || !hostRef.current) {
+        console.log('no ',!openedRef.current , !term , !fit , ! hostRef.current)
+        return;
+      };
+      const { width, height } = hostRef.current.getBoundingClientRect();
+      console.log('host size', width, height);
+      if (width < 1 || height < 1) return;
+      try {
+        fit.fit();
+        terminalResize(pane.id, term.cols, term.rows).catch((err) => {
+          console.error('error while resizing', err)
+        });
+        term.scrollToBottom();
+        // Force a synchronous redraw of the visible rows so the
+        // canvas/DOM reflects the new dimensions immediately. Without
+        // this xterm sometimes keeps painting at the previous (larger)
+        // size for a frame or two, which clips visibly when shrinking.
+        term.refresh(0, term.rows - 1);
+      } catch (error) {
+        console.error('someting happen while resizing', error)
+        /* swallow - layout jitters */
+      }
+    };
+    window.addEventListener("atlas:terminal-refit", handler);
+    return () => window.removeEventListener("atlas:terminal-refit", handler);
+  }, [pane.id]);
 
   return (
     <div

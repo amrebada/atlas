@@ -167,8 +167,20 @@ function AppInner() {
   // `maxed` is true, the strip paints itself as a fixed overlay (inside the
   const termPaneCount = useTerminalStore((s) => s.panes.length);
   const termMaxed = useTerminalStore((s) => s.maxed);
+  const termCollapsed = useTerminalStore((s) => s.collapsed);
+  const termStripHeight = useTerminalStore((s) => s.stripHeight);
   const showStrip = termPaneCount > 0 || termMaxed;
   const stripInGrid = showStrip && !termMaxed;
+
+  // Drive the strip row size from the store so the resize handle is
+  // explicit (auto-sized tracks didn't shrink reliably for us). We pass
+  // a CSS value the grid can use directly: a px number when the user
+  // has dragged, otherwise the 40vh default.
+  const stripRow = termCollapsed
+    ? "30px"
+    : termStripHeight != null
+      ? `${termStripHeight}px`
+      : "40vh";
 
   return (
     <div className="mac-window">
@@ -177,7 +189,7 @@ function AppInner() {
         style={{
           gridTemplateColumns: `var(--sidebar-w, ${sidebarWidth}px) 1fr 340px`,
           gridTemplateRows: stripInGrid
-            ? "36px 1fr auto"
+            ? `36px minmax(0, 1fr) ${stripRow}`
             : termMaxed
               ? "36px 1fr 0"
               : "36px 1fr",

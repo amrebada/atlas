@@ -111,18 +111,19 @@ pub fn run() {
             // drift between `.atlas/*.json` mtime and DB `updated_at`,
             let sync_worker = SyncWorker::spawn(db.clone());
 
-            // Spawn the embedded MCP server (remote-control feature).
-            // Phase 1: env-var gated, default-off; see `mcp::maybe_spawn`.
-            mcp::maybe_spawn(db.clone());
-
-            app.manage(db);
+            app.manage(db.clone());
             app.manage(watcher);
             let registry = Arc::new(ProvidersRegistry::with_defaults());
             app.manage(Arc::clone(&registry));
-            app.manage(Arc::new(SessionsManager::new(registry)));
+            let sessions_mgr = Arc::new(SessionsManager::new(registry));
+            app.manage(Arc::clone(&sessions_mgr));
             app.manage(ctx);
             app.manage(terminal);
             app.manage(sync_worker);
+
+            // Spawn the embedded MCP server (remote-control feature).
+            // Phase 1: env-var gated, default-off; see `mcp::maybe_spawn`.
+            mcp::maybe_spawn(db, sessions_mgr, app_data.clone());
 
             // P9 - apply persisted "launch at login" + "menu bar agent"
             let persisted = tauri::async_runtime::block_on(

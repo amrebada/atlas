@@ -161,9 +161,14 @@ export function Scripts({ project }: ScriptsProps) {
             branch: project.branch,
             projectId: project.id,
             projectLabel: project.name,
-            // Stash the shell invocation so the pane-header "rerun"
-            command: "sh",
-            args: ["-lc", s.cmd],
+            // Stash the args in the form `terminal_open` expects when
+            // `command` is omitted — the backend then prepends `-i -l`
+            // and uses the user's `$SHELL`, identical to how
+            // `scripts::runner::run` first launched it. Stashing
+            // `sh -lc` instead would reroute rerun to plain bourne
+            // shell with no zsh-rc / no nvm / no fnm — the script would
+            // run with the system PATH and a stale Node version.
+            args: ["-c", s.cmd],
           }),
         );
       });
@@ -225,8 +230,9 @@ export function Scripts({ project }: ScriptsProps) {
         branch: project.branch,
         projectId: project.id,
         projectLabel: project.name,
-        command: "sh",
-        args: ["-lc", script.cmd],
+        // See the matching note in `runScripts`: leave `command`
+        // undefined so rerun re-enters the `$SHELL -i -l -c …` path.
+        args: ["-c", script.cmd],
       }),
     );
   };

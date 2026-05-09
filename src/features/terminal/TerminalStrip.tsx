@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import {
   DndContext,
@@ -87,36 +87,55 @@ export function TerminalStrip({
 
   const [resizing, setResizing] = useState(false);
 
-  // Drag the top edge to grow/shrink the strip. Default is 40vh; the
-  // user can pull it up to ~95vh when running TUIs that need a lot of
-  // rows. A double-click resets to the default.
+  // Drag the top edge to grow/shrink the strip. The strip's top edge
+  // tracks the cursor — `stripHeight = viewport_bottom - cursor_Y`,
+  // clamped between 120 and 95vh — and `stripHeight` drives the grid
+  // row in App.tsx, so the change is immediate and grid-deterministic.
+  // Pointer capture keeps move/up events flowing even after the cursor
+  // leaves the 6px handle area.
   const startResize = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      const startY = e.clientY;
-      const initial =
-        stripHeight != null ? stripHeight : window.innerHeight * 0.4;
+      const target = e.currentTarget;
+      const pointerId = e.pointerId;
+      try {
+        target.setPointerCapture(pointerId);
+      } catch (error) {
+        console.error('something happen while setPointerCapture', error)
+        /* setPointerCapture can throw on some browsers if the pointer
+           is already captured; we don't care, the listeners still fire */
+      }
       setResizing(true);
       document.body.style.cursor = "ns-resize";
       document.body.style.userSelect = "none";
-      const onMove = (ev: PointerEvent) => {
-        const delta = startY - ev.clientY;
+      const computeHeight = (clientY: number) => {
         const max = window.innerHeight * 0.95;
-        const next = Math.max(120, Math.min(max, initial + delta));
-        setStripHeight(next);
+        return Math.max(120, Math.min(max, window.innerHeight - clientY));
       };
-      const onUp = () => {
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
+      const onMove = (ev: PointerEvent) => {
+        setStripHeight(computeHeight(ev.clientY));
+      };
+      const cleanup = () => {
+        target.removeEventListener("pointermove", onMove);
+        target.removeEventListener("pointerup", onUp);
+        target.removeEventListener("pointercancel", onUp);
+        try {
+          target.releasePointerCapture(pointerId);
+        } catch (error) {
+           console.error('something happen while releasePointerCapture', error)
+          /* already released */
+        }
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
         setResizing(false);
       };
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
+      const onUp = () => cleanup();
+      target.addEventListener("pointermove", onMove);
+      target.addEventListener("pointerup", onUp);
+      target.addEventListener("pointercancel", onUp);
     },
-    [stripHeight, setStripHeight],
+    [setStripHeight],
   );
 
   const resetHeight = useCallback(() => {
@@ -203,6 +222,30 @@ export function TerminalStrip({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [maxed, setMaxed]);
+
+  // Broadcast a refit signal whenever any state that could affect a
+  // pane's host dimensions changes. `groups` and `allPanes` are watched
+  // by reference (Zustand creates new arrays on mutation), so adding a
+  // pane, switching layouts, or auto-promoting tabs→grid all fire.
+  // Each TerminalPane re-fits its xterm to the new host size in
+  // response.
+  useLayoutEffect(() => {
+    window.dispatchEvent(new Event("atlas:terminal-refit"));
+  }, [stripHeight, maxed, collapsed, activeGroupId, groups, allPanes]);
+
+  // Hard backstop: observe the strip itself so any layout change that
+  // resizes its content area (drag handle, OS window resize, sibling
+  // grid rows shifting) fires a refit even if no React state moved.
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = stripRef.current;
+    if (!node) return;
+    const ro = new ResizeObserver(() => {
+      window.dispatchEvent(new Event("atlas:terminal-refit"));
+    });
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
 
   // NOTE: Project-switch restore used to live here, but TerminalStrip is
 
@@ -314,22 +357,23 @@ export function TerminalStrip({
       }
     : collapsed
       ? {
-          // Only the top bar shows. No flex-grow so the parent grid row
-          height: 30,
+          // App.tsx grid drives the row to 30px; we just fill it.
+          height: "100%",
+          minHeight: 0,
           borderTop: "1px solid var(--line)",
           background: "var(--surface)",
           display: "flex",
           flexDirection: "column",
           minWidth: 0,
-          flexShrink: 0,
         }
       : {
-          // Default 40vh, but user-resizable via the top-edge handle
-          // below. Hard cap at 95vh so the strip can't completely
-          // swallow the chrome above it.
-          height: stripHeight != null ? stripHeight : "40vh",
-          minHeight: 120,
-          maxHeight: "95vh",
+          // Height is driven entirely by App.tsx's grid row (which
+          // reads `stripHeight` from the store). The resize handle
+          // below mutates `stripHeight`, which directly resizes the
+          // grid row — no auto-track negotiation in the middle to drop
+          // changes mid-drag.
+          height: "100%",
+          minHeight: 0,
           borderTop: "1px solid var(--line)",
           background: "var(--surface)",
           display: "flex",
@@ -339,7 +383,7 @@ export function TerminalStrip({
         };
 
   return (
-    <div style={stripStyle}>
+    <div ref={stripRef} style={stripStyle}>
       {/* Top-edge resize handle. Drag up to grow, down to shrink, or
           double-click to restore the 40vh default. Hidden when the
           strip is in a fixed-size mode (maxed / collapsed). */}
@@ -639,26 +683,32 @@ function PaneArea({
   const active = panes.find((p) => p.id === activePaneId) ?? panes[0];
 
   // Every layout uses the SAME DOM shape: one `<div key={id}>` wrapper
+  // around each pane. `minHeight: 0` is the critical bit — without it
+  // a flex-column ancestor's `min-height: auto` resolves to the grid's
+  // intrinsic min-content (which includes xterm's possibly-stale rows)
+  // and the strip refuses to shrink, even though it grows fine.
   const containerStyle: CSSProperties =
     layout === "tabs"
-      ? { position: "relative", flex: 1, minWidth: 0 }
+      ? { position: "relative", flex: 1, minWidth: 0, minHeight: 0 }
       : layout === "split-v"
         ? {
             display: "grid",
-            gridTemplateColumns: `repeat(${panes.length}, 1fr)`,
+            gridTemplateColumns: `repeat(${panes.length}, minmax(0, 1fr))`,
             gap: 1,
             background: "var(--line)",
             flex: 1,
             minWidth: 0,
+            minHeight: 0,
           }
         : layout === "split-h"
           ? {
               display: "grid",
-              gridTemplateRows: `repeat(${panes.length}, 1fr)`,
+              gridTemplateRows: `repeat(${panes.length}, minmax(0, 1fr))`,
               gap: 1,
               background: "var(--line)",
               flex: 1,
               minWidth: 0,
+              minHeight: 0,
             }
           : gridContainerStyle(panes.length);
 
@@ -793,12 +843,13 @@ function gridContainerStyle(count: number): CSSProperties {
   const rows = Math.max(1, Math.ceil(count / cols));
   return {
     display: "grid",
-    gridTemplateColumns: `repeat(${cols}, 1fr)`,
-    gridTemplateRows: `repeat(${rows}, 1fr)`,
+    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+    gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
     gap: 1,
     background: "var(--line)",
     flex: 1,
     minWidth: 0,
+    minHeight: 0,
   };
 }
 
