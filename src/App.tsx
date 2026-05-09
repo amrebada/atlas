@@ -15,6 +15,7 @@ import { ContextMenu } from "./features/context-menu/ContextMenu";
 import { BulkActionBar } from "./features/multi-select/BulkActionBar";
 import { CheatSheetOverlay } from "./features/help/CheatSheetOverlay";
 import { McpApprovalDialog } from "./features/mcp/ApprovalDialog";
+import { useMcpPaneEvents } from "./features/mcp/usePaneEvents";
 import { TerminalStrip } from "./features/terminal/TerminalStrip";
 import { TodayView } from "./features/planner/TodayView";
 import { TimelineView } from "./features/planner/TimelineView";
@@ -68,6 +69,10 @@ function AppInner() {
 
   // Mount the Rust→React event bridge once at the top of the tree. Every
   useProjectEvents();
+
+  // MCP-driven pane creation — when a remote AI client opens a terminal /
+  // session via the MCP server, sync the new pane into the React store.
+  useMcpPaneEvents();
 
   // Global keyboard shortcuts (⌘K, ⌘N, ⌘,, ⌘E, Esc). Mounted ONCE here so
   useGlobalShortcuts();

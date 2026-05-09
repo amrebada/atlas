@@ -38,7 +38,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -576,6 +576,72 @@ fn tool_descriptors() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "atlas_open_terminal",
+            "description": "Open a plain shell pane rooted at the project's directory. \
+                            Returns the pane id (write to it via terminal:input events). \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": { "type": "string" },
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["project_id", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_open_session",
+            "description": "Start a fresh AI CLI session for a project. Pick the provider \
+                            from atlas_list_sessions output or 'claude' / 'codex' / 'opencode'. \
+                            Returns the pane id of the new session. \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": { "type": "string" },
+                    "provider_id": {
+                        "type": "string",
+                        "description": "Provider id, e.g. \"claude\", \"codex\", \"opencode\"."
+                    },
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["project_id", "provider_id", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_git_commit",
+            "description": "Stage every tracked + untracked change in the project and commit \
+                            with the given message. Returns { ok, stdout, stderr }. \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": { "type": "string" },
+                    "message": { "type": "string" },
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["project_id", "message", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_git_push",
+            "description": "Push the current branch to its tracked upstream, setting upstream \
+                            to origin/<branch> if not configured. Returns { ok, stdout, stderr }. \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": { "type": "string" },
+                    "scoped_token": { "type": "string" }
+                },
+                "required": ["project_id", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -599,6 +665,10 @@ async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, Stri
         "atlas_rename_project" => rename_project(state, &args).await,
         "atlas_set_project_tags" => set_project_tags(state, &args).await,
         "atlas_run_script" => run_script(state, &args).await,
+        "atlas_open_terminal" => open_terminal(state, &args).await,
+        "atlas_open_session" => open_session(state, &args).await,
+        "atlas_git_commit" => git_commit(state, &args).await,
+        "atlas_git_push" => git_push(state, &args).await,
         other => Err((ERR_METHOD_NOT_FOUND, format!("unknown tool: {other}"))),
     }
 }
@@ -876,6 +946,199 @@ async fn run_script(state: &McpState, args: &Value) -> Result<Value, (i32, Strin
         "scriptId": script_id,
         "scriptName": script.name,
     }))
+}
+
+async fn open_terminal(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+    let project_id = require_str(args, "project_id")?;
+    let project = state
+        .db
+        .get_project(project_id)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("get_project failed: {e}")))?
+        .ok_or((
+            ERR_INVALID_PARAMS,
+            format!("project not found: {project_id}"),
+        ))?;
+
+    use crate::storage::types::PaneKind;
+    use crate::terminal::{OpenRequest, TerminalManager};
+    let manager = state
+        .app
+        .try_state::<TerminalManager>()
+        .ok_or((ERR_INTERNAL, "TerminalManager not registered".into()))?;
+    let cwd = PathBuf::from(&project.path);
+    let title = project.name.clone();
+    let req = OpenRequest {
+        kind: PaneKind::Shell,
+        cwd: cwd.clone(),
+        command: None,
+        args: Vec::new(),
+        env: Vec::new(),
+        title: Some(title.clone()),
+        branch: None,
+        script_id: None,
+        session_id: None,
+        cols: None,
+        rows: None,
+    };
+    let pane_id = manager
+        .open(req)
+        .map_err(|e| (ERR_INTERNAL, format!("terminal open failed: {e}")))?;
+
+    let _ = state.app.emit(
+        "mcp:pane:opened",
+        json!({
+            "id": pane_id,
+            "kind": "shell",
+            "cwd": cwd.to_string_lossy(),
+            "title": title,
+            "projectId": project_id,
+            "projectLabel": project.name,
+        }),
+    );
+
+    ok_text(&json!({ "paneId": pane_id, "projectId": project_id }))
+}
+
+async fn open_session(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+    let project_id = require_str(args, "project_id")?;
+    let provider_id = require_str(args, "provider_id")?;
+
+    let project = state
+        .db
+        .get_project(project_id)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("get_project failed: {e}")))?
+        .ok_or((
+            ERR_INVALID_PARAMS,
+            format!("project not found: {project_id}"),
+        ))?;
+    let project_path = PathBuf::from(&project.path);
+
+    let registry = state.sessions.registry();
+    let provider = registry
+        .get(provider_id)
+        .ok_or((ERR_INVALID_PARAMS, format!("unknown provider: {provider_id}")))?;
+    let invocation = provider.new_invocation(&project_path);
+
+    use crate::storage::types::PaneKind;
+    use crate::terminal::{OpenRequest, TerminalManager};
+    let manager = state
+        .app
+        .try_state::<TerminalManager>()
+        .ok_or((ERR_INTERNAL, "TerminalManager not registered".into()))?;
+    let req = OpenRequest {
+        kind: PaneKind::ClaudeSession,
+        cwd: PathBuf::from(&invocation.cwd),
+        command: Some(invocation.command.clone()),
+        args: invocation.args.clone(),
+        env: Vec::new(),
+        title: Some(format!("{} · {}", project.name, provider_id)),
+        branch: None,
+        script_id: None,
+        session_id: None,
+        cols: None,
+        rows: None,
+    };
+    let pane_id = manager
+        .open(req)
+        .map_err(|e| (ERR_INTERNAL, format!("session open failed: {e}")))?;
+
+    let _ = state.app.emit(
+        "mcp:pane:opened",
+        json!({
+            "id": pane_id,
+            "kind": "claude-session",
+            "cwd": invocation.cwd,
+            "title": format!("{} · {}", project.name, provider_id),
+            "projectId": project_id,
+            "projectLabel": project.name,
+        }),
+    );
+
+    ok_text(&json!({
+        "paneId": pane_id,
+        "projectId": project_id,
+        "providerId": provider_id,
+        "command": invocation.command,
+        "args": invocation.args,
+    }))
+}
+
+async fn git_commit(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+    let project_id = require_str(args, "project_id")?;
+    let message = require_str(args, "message")?.trim();
+    if message.is_empty() {
+        return Err((ERR_INVALID_PARAMS, "commit message is empty".into()));
+    }
+
+    let project = state
+        .db
+        .get_project(project_id)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("get_project failed: {e}")))?
+        .ok_or((
+            ERR_INVALID_PARAMS,
+            format!("project not found: {project_id}"),
+        ))?;
+    let cwd = PathBuf::from(&project.path);
+
+    let add = crate::commands::git::run_git(&cwd, &["add", "-A"])
+        .await
+        .map_err(|e| (ERR_INTERNAL, e))?;
+    if !add.ok {
+        return ok_text(&add);
+    }
+    let commit = crate::commands::git::run_git(&cwd, &["commit", "-m", message])
+        .await
+        .map_err(|e| (ERR_INTERNAL, e))?;
+    ok_text(&commit)
+}
+
+async fn git_push(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
+    require_approval(state, args)?;
+    let project_id = require_str(args, "project_id")?;
+    let project = state
+        .db
+        .get_project(project_id)
+        .await
+        .map_err(|e| (ERR_INTERNAL, format!("get_project failed: {e}")))?
+        .ok_or((
+            ERR_INVALID_PARAMS,
+            format!("project not found: {project_id}"),
+        ))?;
+    let cwd = PathBuf::from(&project.path);
+
+    let first = crate::commands::git::run_git(&cwd, &["push"])
+        .await
+        .map_err(|e| (ERR_INTERNAL, e))?;
+    if first.ok {
+        return ok_text(&first);
+    }
+    // Same upstream-fallback heuristic the in-app `git_push` command uses.
+    let needs_upstream = first.stderr.contains("no upstream branch")
+        || first.stderr.contains("has no upstream branch")
+        || first.stderr.contains("--set-upstream");
+    if !needs_upstream {
+        return ok_text(&first);
+    }
+    let branch = match current_branch(&cwd) {
+        Some(b) => b,
+        None => return ok_text(&first),
+    };
+    let with_upstream = crate::commands::git::run_git(&cwd, &["push", "-u", "origin", &branch])
+        .await
+        .map_err(|e| (ERR_INTERNAL, e))?;
+    ok_text(&with_upstream)
+}
+
+fn current_branch(cwd: &std::path::Path) -> Option<String> {
+    let repo = git2::Repository::open(cwd).ok()?;
+    let head = repo.head().ok()?;
+    head.shorthand().map(str::to_string)
 }
 
 /// Constant-time byte comparison so an attacker on the loopback can't

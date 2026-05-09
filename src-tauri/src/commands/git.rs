@@ -148,7 +148,7 @@ async fn resolve_project_path(state: &Db, project_id: &str) -> Result<PathBuf, S
     Ok(PathBuf::from(&project.path))
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<GitActionResult, String> {
+pub(crate) async fn run_git(cwd: &Path, args: &[&str]) -> Result<GitActionResult, String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(cwd)
