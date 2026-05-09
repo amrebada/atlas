@@ -26,6 +26,14 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
     let resizeObs: ResizeObserver | null = null;
     let themeObs: MutationObserver | null = null;
     let opened = false; // term.open() has been called AND container had non-zero dims
+    // Tracks whether the host was offscreen (display:none ancestor → 0×0
+    // contentRect) since the last paint. xterm.js pauses its renderer
+    // while hidden, so when the host becomes visible again we have to
+    // anchor the viewport to the cursor and force a refresh — otherwise
+    // any output produced while the pane was off-screen sits below the
+    // visible viewport until the user types something. This is the
+    // group-switch / collapse / minimize case.
+    let wasHidden = true;
     const pendingChunks: (string | Uint8Array)[] = []; // buffered PTY output until we're opened
 
     (async () => {
@@ -141,15 +149,30 @@ export function TerminalPane({ pane, focused, onFocus }: TerminalPaneProps) {
         const entry = entries[0];
         const w = entry?.contentRect.width ?? 0;
         const h = entry?.contentRect.height ?? 0;
-        if (w < 1 || h < 1) return;
+        if (w < 1 || h < 1) {
+          // Ancestor went display:none. Mark so the next non-zero
+          // entry can re-anchor the viewport.
+          wasHidden = true;
+          return;
+        }
         if (!opened) {
           tryOpen();
+          if (opened) wasHidden = false;
           return;
         }
         if (!term || !fit) return;
         try {
           fit.fit();
           terminalResize(pane.id, term.cols, term.rows).catch(() => {});
+          if (wasHidden) {
+            // Coming back from offscreen. Pin the viewport to the
+            // cursor and force a redraw so output produced while we
+            // were hidden actually paints — without this, the strip
+            // shows a stale frame until the user presses a key.
+            term.scrollToBottom();
+            term.refresh(0, term.rows - 1);
+            wasHidden = false;
+          }
         } catch {
           /* swallow - layout jitters */
         }
