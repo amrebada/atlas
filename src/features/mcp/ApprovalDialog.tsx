@@ -9,10 +9,16 @@ import { useUiStore } from "../../state/store";
 // elapses; we close the dialog if the cancelled id matches what we're
 // showing.
 
+type ApprovalStep = {
+  tool: string;
+  args: Record<string, unknown>;
+};
+
 type PendingRequest = {
   id: string;
   summary: string;
   ttlSeconds: number;
+  steps: ApprovalStep[];
   receivedAt: number;
 };
 
@@ -20,6 +26,7 @@ type ApprovalRequestPayload = {
   id: string;
   summary: string;
   ttlSeconds: number;
+  steps?: ApprovalStep[];
 };
 
 type ApprovalCancelledPayload = { id: string };
@@ -40,7 +47,13 @@ export function McpApprovalDialog() {
           if (cancelled) return;
           setQueue((prev) => [
             ...prev,
-            { ...e.payload, receivedAt: Date.now() },
+            {
+              id: e.payload.id,
+              summary: e.payload.summary,
+              ttlSeconds: e.payload.ttlSeconds,
+              steps: e.payload.steps ?? [],
+              receivedAt: Date.now(),
+            },
           ]);
         },
       );
@@ -134,6 +147,45 @@ export function McpApprovalDialog() {
         >
           {head.summary}
         </div>
+
+        {head.steps.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                color: "var(--text-dim)",
+                marginBottom: 6,
+              }}
+            >
+              {head.steps.length} step{head.steps.length === 1 ? "" : "s"}
+            </div>
+            <ol
+              style={{
+                margin: 0,
+                paddingLeft: 22,
+                fontSize: 12,
+                lineHeight: 1.5,
+                fontFamily: "var(--mono)",
+              }}
+            >
+              {head.steps.map((step, i) => (
+                <li key={i} style={{ marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{step.tool}</span>
+                  {Object.keys(step.args).length > 0 && (
+                    <span style={{ color: "var(--text-dim)" }}>
+                      {" "}
+                      {JSON.stringify(step.args)}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
         <div
           style={{
             fontSize: 11,
@@ -141,8 +193,9 @@ export function McpApprovalDialog() {
             marginBottom: 12,
           }}
         >
-          Approving issues a single-batch token valid for 60 seconds. Mutating
-          tools beyond that window will need a fresh approval.
+          {head.steps.length > 0
+            ? `Approving binds the token to these ${head.steps.length} call${head.steps.length === 1 ? "" : "s"}; each is single-use and must match exactly.`
+            : "Approving issues a single-batch token valid for 60 seconds. Mutating tools beyond that window will need a fresh approval."}
         </div>
         {queue.length > 1 && (
           <div

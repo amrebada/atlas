@@ -150,15 +150,29 @@ const SCOPED_TOKEN_TTL_SECS: u64 = 60;
 /// MCP server inserts a oneshot sender keyed by request id, emits a
 /// `mcp:approval:request` event, and awaits the receiver. The Tauri
 /// command resolves the matching entry.
+///
+/// Phase 2.3: tokens can be bound to a list of (tool, args) step
+/// signatures. A bound token requires `step_index` on each mutating call,
+/// the (tool, args) at that index must hash to the same signature the user
+/// approved, and each step is single-use. This closes the gap where a
+/// blanket 60s window let an AI invoke any mutating tool the user hadn't
+/// actually authorized.
 pub struct ApprovalRegistry {
     pending: Mutex<HashMap<Uuid, oneshot::Sender<bool>>>,
     approved: Mutex<HashMap<String, ApprovedToken>>,
     app: AppHandle,
 }
 
-#[derive(Debug, Clone, Copy)]
 struct ApprovedToken {
     expires_at: Instant,
+    /// Empty = unbound (legacy: any mutating tool ok inside the TTL).
+    /// Non-empty = bound: each step signature is a one-shot pass.
+    steps: Vec<ApprovedStep>,
+}
+
+struct ApprovedStep {
+    signature: String,
+    used: bool,
 }
 
 impl ApprovalRegistry {
@@ -170,28 +184,36 @@ impl ApprovalRegistry {
         })
     }
 
-    /// Open a new approval request and await the user's decision. Returns
-    /// the issued scoped token on approve, or an error string on reject /
-    /// timeout / cancellation. The summary is sent verbatim to the UI.
-    async fn request(&self, summary: &str) -> Result<String, String> {
+    /// Open a new approval request and await the user's decision. `steps`
+    /// is a list of (tool, args) tuples — empty for an unbound (legacy)
+    /// token. The summary is sent verbatim to the UI alongside the steps.
+    async fn request(
+        &self,
+        summary: &str,
+        steps: Vec<(String, Value)>,
+    ) -> Result<String, String> {
         let id = Uuid::new_v4();
         let (tx, rx) = oneshot::channel::<bool>();
         self.pending.lock().unwrap().insert(id, tx);
 
+        let step_descriptors: Vec<Value> = steps
+            .iter()
+            .map(|(tool, args)| json!({ "tool": tool, "args": args }))
+            .collect();
+
         let _ = self.app.emit(
             "mcp:approval:request",
-            serde_json::json!({
+            json!({
                 "id": id.to_string(),
                 "summary": summary,
                 "ttlSeconds": APPROVAL_REQUEST_TIMEOUT_SECS,
+                "steps": step_descriptors,
             }),
         );
 
         let outcome =
             tokio::time::timeout(Duration::from_secs(APPROVAL_REQUEST_TIMEOUT_SECS), rx).await;
 
-        // Always remove the pending entry — by this point the receiver is
-        // either complete, cancelled, or its sender has been dropped.
         self.pending.lock().unwrap().remove(&id);
 
         let approved = match outcome {
@@ -200,7 +222,7 @@ impl ApprovalRegistry {
             Err(_) => {
                 let _ = self.app.emit(
                     "mcp:approval:cancelled",
-                    serde_json::json!({ "id": id.to_string() }),
+                    json!({ "id": id.to_string() }),
                 );
                 return Err("approval timed out".into());
             }
@@ -210,19 +232,25 @@ impl ApprovalRegistry {
             return Err("rejected by user".into());
         }
 
+        let approved_steps: Vec<ApprovedStep> = steps
+            .into_iter()
+            .map(|(tool, args)| ApprovedStep {
+                signature: step_signature(&tool, &args),
+                used: false,
+            })
+            .collect();
         let token = format!("appr_{}", Uuid::new_v4().simple());
         self.approved.lock().unwrap().insert(
             token.clone(),
             ApprovedToken {
                 expires_at: Instant::now() + Duration::from_secs(SCOPED_TOKEN_TTL_SECS),
+                steps: approved_steps,
             },
         );
         Ok(token)
     }
 
-    /// Called from the Tauri `mcp_approval_resolve` command. Returns an
-    /// error if the request id doesn't match a pending entry (e.g. it
-    /// already timed out, or the user double-clicked).
+    /// Called from the Tauri `mcp_approval_resolve` command.
     pub fn resolve(&self, id: Uuid, approve: bool) -> Result<(), String> {
         let tx = self
             .pending
@@ -230,29 +258,71 @@ impl ApprovalRegistry {
             .unwrap()
             .remove(&id)
             .ok_or_else(|| "no such pending approval".to_string())?;
-        // If send fails the receiver is gone (already cleaned up). Either
-        // way the outcome is the same: no waiter to notify.
         let _ = tx.send(approve);
         Ok(())
     }
 
-    /// Validate that `token` is approved and unexpired. Used by mutating
-    /// tools as a precondition. Multi-use within the TTL window — Phase
-    /// 2.1 will tighten this with per-step signatures.
-    fn validate(&self, token: &str) -> Result<(), String> {
+    /// Validate the token and, when bound, the specific step. On success
+    /// for a bound step, marks it consumed (single-use). For unbound
+    /// (legacy) tokens, just checks expiry.
+    fn consume_step(
+        &self,
+        token: &str,
+        tool: &str,
+        args: &Value,
+        step_index: Option<usize>,
+    ) -> Result<(), String> {
         let mut approved = self.approved.lock().unwrap();
-        // Drop expired entries opportunistically.
         let now = Instant::now();
         approved.retain(|_, t| t.expires_at > now);
 
         let entry = approved
-            .get(token)
+            .get_mut(token)
             .ok_or_else(|| "invalid or expired scoped_token".to_string())?;
         if now > entry.expires_at {
             return Err("scoped_token expired".into());
         }
+
+        if entry.steps.is_empty() {
+            return Ok(());
+        }
+
+        let idx = step_index.ok_or_else(|| {
+            "this scoped_token is bound to a step plan; pass step_index (0-based) on the mutating call"
+                .to_string()
+        })?;
+        let len = entry.steps.len();
+        let step = entry.steps.get_mut(idx).ok_or_else(|| {
+            format!("step_index {idx} out of range (plan has {len} steps)")
+        })?;
+        if step.used {
+            return Err(format!("step_index {idx} was already consumed"));
+        }
+        let expected = step_signature(tool, args);
+        if step.signature != expected {
+            return Err(format!(
+                "step {idx} signature mismatch — the (tool, args) you sent don't match what the user approved"
+            ));
+        }
+        step.used = true;
         Ok(())
     }
+}
+
+/// Stable signature for an approved step. We don't need cryptographic
+/// hashing here — the registry is in-process — so a plain string built from
+/// the tool name + JSON-serialized args is enough. `serde_json::Map` is a
+/// BTreeMap by default, which means keys are alphabetical, so the same
+/// (tool, args) produce the same signature regardless of how the AI client
+/// ordered its JSON object.
+fn step_signature(tool: &str, args: &Value) -> String {
+    let mut filtered = args.clone();
+    if let Value::Object(m) = &mut filtered {
+        m.remove("scoped_token");
+        m.remove("step_index");
+    }
+    let json = serde_json::to_string(&filtered).unwrap_or_else(|_| "{}".into());
+    format!("{tool}:{json}")
 }
 
 // ---------- JSON-RPC envelope ----------
@@ -472,10 +542,14 @@ fn tool_descriptors() -> Vec<Value> {
         json!({
             "name": "approval_request_plan",
             "description": "Ask the user to approve a batch of upcoming mutating actions. \
-                            Pass a clear human-readable summary describing every step (e.g. \
-                            \"Pin 'atlas' and 'notaty', archive 'old-experiment', then run \
-                            'lint' on each\"). Returns a scoped_token valid for 60 seconds; \
-                            pass it as the `scoped_token` argument to mutating tools. \
+                            Pass `summary` (shown verbatim) and STRONGLY PREFER passing `steps`: \
+                            an array of {tool, args} entries describing exactly what you intend \
+                            to do. When steps are given, the issued scoped_token is BOUND to \
+                            those calls — each mutating call must include `step_index` (0-based \
+                            position) and the (tool, args) it sends must match the approved \
+                            step. Each step is single-use. \
+                            When steps are omitted, the token is unbound (legacy behavior): any \
+                            number of mutating tools within 60s. Use this only for trivial cases. \
                             On reject or 120s timeout this tool errors — re-plan and ask again.",
             "inputSchema": {
                 "type": "object",
@@ -483,6 +557,24 @@ fn tool_descriptors() -> Vec<Value> {
                     "summary": {
                         "type": "string",
                         "description": "Plain-English summary of what will happen. Shown verbatim to the user."
+                    },
+                    "steps": {
+                        "type": "array",
+                        "description": "Optional but recommended. The exact (tool, args) calls you plan to make. The user sees these in the approval modal; mutating calls must reference them by step_index.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tool": {
+                                    "type": "string",
+                                    "description": "Exact tool name, e.g. \"atlas_pin_project\"."
+                                },
+                                "args": {
+                                    "type": "object",
+                                    "description": "Args you will pass on the call (excluding scoped_token + step_index, which are filled in at call time)."
+                                }
+                            },
+                            "required": ["tool", "args"]
+                        }
                     }
                 },
                 "required": ["summary"],
@@ -501,7 +593,8 @@ fn tool_descriptors() -> Vec<Value> {
                     "scoped_token": {
                         "type": "string",
                         "description": "Approval token from approval_request_plan."
-                    }
+                    },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["id", "pinned", "scoped_token"],
                 "additionalProperties": false
@@ -516,7 +609,8 @@ fn tool_descriptors() -> Vec<Value> {
                 "properties": {
                     "id": { "type": "string", "description": "Project id." },
                     "archived": { "type": "boolean", "description": "True to archive, false to restore." },
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["id", "archived", "scoped_token"],
                 "additionalProperties": false
@@ -531,7 +625,8 @@ fn tool_descriptors() -> Vec<Value> {
                 "properties": {
                     "id": { "type": "string", "description": "Project id." },
                     "name": { "type": "string", "description": "New display name." },
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["id", "name", "scoped_token"],
                 "additionalProperties": false
@@ -550,7 +645,8 @@ fn tool_descriptors() -> Vec<Value> {
                         "items": { "type": "string" },
                         "description": "Full replacement tag list."
                     },
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["id", "tags", "scoped_token"],
                 "additionalProperties": false
@@ -570,7 +666,8 @@ fn tool_descriptors() -> Vec<Value> {
                         "type": "string",
                         "description": "Id from atlas_list_scripts. Use that tool first to discover ids."
                     },
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["project_id", "script_id", "scoped_token"],
                 "additionalProperties": false
@@ -585,7 +682,8 @@ fn tool_descriptors() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "project_id": { "type": "string" },
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["project_id", "scoped_token"],
                 "additionalProperties": false
@@ -605,7 +703,8 @@ fn tool_descriptors() -> Vec<Value> {
                         "type": "string",
                         "description": "Provider id, e.g. \"claude\", \"codex\", \"opencode\"."
                     },
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["project_id", "provider_id", "scoped_token"],
                 "additionalProperties": false
@@ -621,7 +720,8 @@ fn tool_descriptors() -> Vec<Value> {
                 "properties": {
                     "project_id": { "type": "string" },
                     "message": { "type": "string" },
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["project_id", "message", "scoped_token"],
                 "additionalProperties": false
@@ -636,7 +736,8 @@ fn tool_descriptors() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "project_id": { "type": "string" },
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["project_id", "scoped_token"],
                 "additionalProperties": false
@@ -651,7 +752,8 @@ fn tool_descriptors() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["scoped_token"],
                 "additionalProperties": false
@@ -705,7 +807,8 @@ fn tool_descriptors() -> Vec<Value> {
                         "type": "string",
                         "description": "App name as it appears in atlas_list_windows.owner (e.g. \"Safari\", \"Visual Studio Code\")."
                     },
-                    "scoped_token": { "type": "string" }
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
                 },
                 "required": ["owner", "scoped_token"],
                 "additionalProperties": false
@@ -714,12 +817,41 @@ fn tool_descriptors() -> Vec<Value> {
     ]
 }
 
+/// Tools that mutate state or take privacy-sensitive action. The dispatcher
+/// gates these centrally so individual tool fns don't repeat the approval
+/// check, and so it's a single edit to add a new mutating tool.
+const MUTATING_TOOLS: &[&str] = &[
+    "atlas_pin_project",
+    "atlas_archive_project",
+    "atlas_rename_project",
+    "atlas_set_project_tags",
+    "atlas_run_script",
+    "atlas_open_terminal",
+    "atlas_open_session",
+    "atlas_git_commit",
+    "atlas_git_push",
+    "atlas_take_screenshot",
+    "atlas_focus_window",
+];
+
 async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, String)> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
         .ok_or((ERR_INVALID_PARAMS, "missing tool name".into()))?;
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
+
+    if MUTATING_TOOLS.contains(&name) {
+        let token = require_str(&args, "scoped_token")?;
+        let step_index = args
+            .get("step_index")
+            .and_then(Value::as_u64)
+            .map(|n| n as usize);
+        state
+            .approvals
+            .consume_step(token, name, &args, step_index)
+            .map_err(|e| (ERR_INVALID_PARAMS, e))?;
+    }
 
     match name {
         "atlas_list_projects" => list_projects(&state.db, &args).await,
@@ -765,15 +897,6 @@ fn require_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, (i32, String)>
         .ok_or((ERR_INVALID_PARAMS, format!("missing {key}")))
 }
 
-/// Validate a `scoped_token` argument and bubble up the matching JSON-RPC
-/// error. Every mutating tool starts with this.
-fn require_approval(state: &McpState, args: &Value) -> Result<(), (i32, String)> {
-    let token = require_str(args, "scoped_token")?;
-    state
-        .approvals
-        .validate(token)
-        .map_err(|e| (ERR_INVALID_PARAMS, e))
-}
 
 async fn list_projects(db: &Db, args: &Value) -> Result<Value, (i32, String)> {
     let include_archived = args
@@ -869,29 +992,51 @@ async fn list_scripts(db: &Db, args: &Value) -> Result<Value, (i32, String)> {
 
 async fn request_plan(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
     let summary = require_str(args, "summary")?;
+    // `steps` is optional. When provided, the issued token is bound to
+    // those exact (tool, args) tuples — each callable once, in any order.
+    // When omitted, the token is unbound (legacy behavior).
+    let steps: Vec<(String, Value)> = args
+        .get("steps")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|s| {
+                    let tool = s.get("tool").and_then(Value::as_str)?.to_string();
+                    let step_args = s.get("args").cloned().unwrap_or(json!({}));
+                    Some((tool, step_args))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let n_steps = steps.len();
     let token = state
         .approvals
-        .request(summary)
+        .request(summary, steps)
         .await
         .map_err(|e| (ERR_INTERNAL, e))?;
+    let bound_note = if n_steps > 0 {
+        format!(" Bound to {n_steps} step(s) — pass step_index on each mutating call.")
+    } else {
+        String::new()
+    };
     Ok(json!({
         "content": [{
             "type": "text",
             "text": format!(
                 "APPROVED. Use scoped_token={token} on mutating tools. \
-                 Valid for {SCOPED_TOKEN_TTL_SECS} seconds."
+                 Valid for {SCOPED_TOKEN_TTL_SECS} seconds.{bound_note}"
             )
         }],
         "structuredContent": {
             "scopedToken": token,
-            "ttlSeconds": SCOPED_TOKEN_TTL_SECS
+            "ttlSeconds": SCOPED_TOKEN_TTL_SECS,
+            "stepCount": n_steps
         },
         "isError": false
     }))
 }
 
 async fn pin_project(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
     let id = require_str(args, "id")?;
     let pinned = args
         .get("pinned")
@@ -913,7 +1058,6 @@ async fn pin_project(state: &McpState, args: &Value) -> Result<Value, (i32, Stri
 }
 
 async fn archive_project(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
     let id = require_str(args, "id")?;
     let archived = args
         .get("archived")
@@ -931,7 +1075,6 @@ async fn archive_project(state: &McpState, args: &Value) -> Result<Value, (i32, 
 }
 
 async fn rename_project(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
     let id = require_str(args, "id")?;
     let name = require_str(args, "name")?;
     let trimmed = name.trim();
@@ -950,7 +1093,6 @@ async fn rename_project(state: &McpState, args: &Value) -> Result<Value, (i32, S
 }
 
 async fn set_project_tags(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
     let id = require_str(args, "id")?;
     let tags: Vec<String> = args
         .get("tags")
@@ -971,7 +1113,6 @@ async fn set_project_tags(state: &McpState, args: &Value) -> Result<Value, (i32,
 }
 
 async fn run_script(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
     let project_id = require_str(args, "project_id")?;
     let script_id = require_str(args, "script_id")?;
 
@@ -1023,7 +1164,6 @@ async fn run_script(state: &McpState, args: &Value) -> Result<Value, (i32, Strin
 }
 
 async fn open_terminal(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
     let project_id = require_str(args, "project_id")?;
     let project = state
         .db
@@ -1076,7 +1216,6 @@ async fn open_terminal(state: &McpState, args: &Value) -> Result<Value, (i32, St
 }
 
 async fn open_session(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
     let project_id = require_str(args, "project_id")?;
     let provider_id = require_str(args, "provider_id")?;
 
@@ -1142,7 +1281,6 @@ async fn open_session(state: &McpState, args: &Value) -> Result<Value, (i32, Str
 }
 
 async fn git_commit(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
     let project_id = require_str(args, "project_id")?;
     let message = require_str(args, "message")?.trim();
     if message.is_empty() {
@@ -1173,7 +1311,6 @@ async fn git_commit(state: &McpState, args: &Value) -> Result<Value, (i32, Strin
 }
 
 async fn git_push(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
     let project_id = require_str(args, "project_id")?;
     let project = state
         .db
@@ -1363,8 +1500,7 @@ if (procs.length === 0) {
     }
 }
 
-async fn focus_window(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
+async fn focus_window(_state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
     let owner = require_str(args, "owner")?;
     #[cfg(not(target_os = "macos"))]
     {
@@ -1395,8 +1531,7 @@ JSON.stringify({{ ok: true, owner: name, pid: p.unixId() }});
     }
 }
 
-async fn take_screenshot(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
-    require_approval(state, args)?;
+async fn take_screenshot(_state: &McpState, _args: &Value) -> Result<Value, (i32, String)> {
 
     #[cfg(not(target_os = "macos"))]
     {
