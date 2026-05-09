@@ -761,8 +761,13 @@ fn tool_descriptors() -> Vec<Value> {
         }),
         json!({
             "name": "atlas_list_screens",
-            "description": "List connected displays with frame, visibleFrame, and backing scale. \
-                            macOS only. Read-only, no approval needed.",
+            "description": "List connected displays. Each entry includes both NSScreen-style \
+                            `frame`/`visibleFrame` (bottom-left origin) and `cgFrame`/`cgVisibleFrame` \
+                            (top-left origin). USE cgFrame when computing coordinates for \
+                            atlas_click / atlas_move_mouse — those tools speak CG space. The \
+                            screens span a single unified coordinate space, so a screen to the \
+                            right of primary has cgFrame.x = primary.width, and a screen above \
+                            primary has negative cgFrame.y. macOS only. Read-only.",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -814,6 +819,76 @@ fn tool_descriptors() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "atlas_type_text",
+            "description": "Type literal text into the currently-focused field, character by \
+                            character (System Events keystroke). Sends the same characters the \
+                            user would type — so URL bars, editors, and forms all work. macOS \
+                            only; requires Accessibility for Atlas. \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "The literal characters to type." },
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
+                },
+                "required": ["text", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_key_combo",
+            "description": "Send a keyboard shortcut. `keys` is an ordered list where the last \
+                            element is the key and any preceding elements are modifiers \
+                            (cmd/shift/ctrl/alt). Special keys: return, tab, space, delete, \
+                            escape, up, down, left, right. Examples: [\"cmd\",\"shift\",\"p\"] \
+                            for the palette, [\"cmd\",\"return\"] for confirm, [\"escape\"] for \
+                            cancel. macOS only; requires Accessibility. \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1,
+                        "description": "Ordered list of modifiers + final key."
+                    },
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
+                },
+                "required": ["keys", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "atlas_click",
+            "description": "Mouse click at CG screen coordinates (x, y) in points. The \
+                            coordinate space is unified across ALL connected displays — origin \
+                            (0,0) is the top-left of the primary display; a screen to the right \
+                            has positive x past primary's width; a screen above has negative y. \
+                            Use atlas_list_screens (cgFrame field) to enumerate the layout. \
+                            Default button is left; pass button=\"right\" for right-click. \
+                            macOS only; requires Accessibility AND Input Monitoring on macOS 14+. \
+                            MUTATING — requires a scoped_token.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "x": { "type": "number", "description": "Screen X in points." },
+                    "y": { "type": "number", "description": "Screen Y in points (top-down)." },
+                    "button": {
+                        "type": "string",
+                        "enum": ["left", "right"],
+                        "default": "left"
+                    },
+                    "scoped_token": { "type": "string" },
+                    "step_index": { "type": "integer", "minimum": 0, "description": "0-based index in the approved plan; required when scoped_token was issued with bound steps." }
+                },
+                "required": ["x", "y", "scoped_token"],
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -832,6 +907,9 @@ const MUTATING_TOOLS: &[&str] = &[
     "atlas_git_push",
     "atlas_take_screenshot",
     "atlas_focus_window",
+    "atlas_type_text",
+    "atlas_key_combo",
+    "atlas_click",
 ];
 
 async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, String)> {
@@ -875,6 +953,9 @@ async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, Stri
         "atlas_list_windows" => list_windows(&args).await,
         "atlas_get_active_window" => get_active_window(&args).await,
         "atlas_focus_window" => focus_window(state, &args).await,
+        "atlas_type_text" => type_text(&args).await,
+        "atlas_key_combo" => key_combo(&args).await,
+        "atlas_click" => click(&args).await,
         other => Err((ERR_METHOD_NOT_FOUND, format!("unknown tool: {other}"))),
     }
 }
@@ -1379,19 +1460,34 @@ async fn list_screens(_args: &Value) -> Result<Value, (i32, String)> {
     }
     #[cfg(target_os = "macos")]
     {
+        // Returns frames in BOTH coordinate systems so callers don't have
+        // to convert. `frame` matches NSScreen (bottom-left origin, y grows
+        // up). `cgFrame` matches CGEvent / CGEventPost — same space the
+        // mouse / click tools take coordinates in (top-left origin, y grows
+        // down). The screens span a single unified coordinate space; a
+        // monitor to the right of primary has positive x at the seam, a
+        // monitor above has negative cgFrame.y.
         let script = r#"
 ObjC.import("AppKit");
-var arr = $.NSScreen.screens;
+var screens = $.NSScreen.screens;
+var primaryHeight = 0;
+if (screens.count > 0) {
+    primaryHeight = screens.objectAtIndex(0).frame.size.height;
+}
 var out = [];
-for (var i = 0; i < arr.count; i++) {
-    var s = arr.objectAtIndex(i);
+for (var i = 0; i < screens.count; i++) {
+    var s = screens.objectAtIndex(i);
     var f = s.frame;
     var vf = s.visibleFrame;
+    var cgY = primaryHeight - (f.origin.y + f.size.height);
+    var cgVY = primaryHeight - (vf.origin.y + vf.size.height);
     out.push({
         index: i,
         primary: i === 0,
         frame: { x: f.origin.x, y: f.origin.y, width: f.size.width, height: f.size.height },
         visibleFrame: { x: vf.origin.x, y: vf.origin.y, width: vf.size.width, height: vf.size.height },
+        cgFrame: { x: f.origin.x, y: cgY, width: f.size.width, height: f.size.height },
+        cgVisibleFrame: { x: vf.origin.x, y: cgVY, width: vf.size.width, height: vf.size.height },
         backingScaleFactor: s.backingScaleFactor
     });
 }
@@ -1524,6 +1620,163 @@ if (procs.length === 0) {{
 var p = procs[0];
 p.frontmost = true;
 JSON.stringify({{ ok: true, owner: name, pid: p.unixId() }});
+"#
+        );
+        let result = run_jxa(&script).await?;
+        ok_text(&result)
+    }
+}
+
+async fn type_text(args: &Value) -> Result<Value, (i32, String)> {
+    let text = require_str(args, "text")?;
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = text;
+        return Err((ERR_INTERNAL, "atlas_type_text is currently macOS-only".into()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // serde_json::to_string handles all the escaping (quotes, backslashes,
+        // newlines, unicode) so the text becomes a safe JS string literal.
+        let text_literal = serde_json::to_string(text)
+            .map_err(|e| (ERR_INTERNAL, format!("encode text: {e}")))?;
+        let script = format!(
+            r#"
+var se = Application("System Events");
+se.keystroke({text_literal});
+JSON.stringify({{ ok: true, length: {text_literal}.length }});
+"#
+        );
+        let result = run_jxa(&script).await?;
+        ok_text(&result)
+    }
+}
+
+/// Map a key name to AppleScript modifier syntax or raw key code. Modifiers
+/// produce `<name> down` strings; specials produce key codes; everything
+/// else (single chars, words like "p") falls back to keystroke.
+fn split_combo(keys: &[String]) -> (Vec<String>, String) {
+    if keys.is_empty() {
+        return (vec![], String::new());
+    }
+    let modifiers = &keys[..keys.len() - 1];
+    let key = keys[keys.len() - 1].clone();
+    let modifier_phrases: Vec<String> = modifiers
+        .iter()
+        .filter_map(|m| match m.to_lowercase().as_str() {
+            "cmd" | "command" | "meta" => Some("command down".into()),
+            "shift" => Some("shift down".into()),
+            "ctrl" | "control" => Some("control down".into()),
+            "alt" | "opt" | "option" => Some("option down".into()),
+            _ => None,
+        })
+        .collect();
+    (modifier_phrases, key)
+}
+
+fn special_key_code(name: &str) -> Option<u16> {
+    match name.to_lowercase().as_str() {
+        "return" | "enter" => Some(36),
+        "tab" => Some(48),
+        "space" => Some(49),
+        "delete" | "backspace" => Some(51),
+        "escape" | "esc" => Some(53),
+        "left" | "arrowleft" => Some(123),
+        "right" | "arrowright" => Some(124),
+        "down" | "arrowdown" => Some(125),
+        "up" | "arrowup" => Some(126),
+        _ => None,
+    }
+}
+
+async fn key_combo(args: &Value) -> Result<Value, (i32, String)> {
+    let keys: Vec<String> = args
+        .get("keys")
+        .and_then(Value::as_array)
+        .ok_or((ERR_INVALID_PARAMS, "missing keys (array)".into()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    if keys.is_empty() {
+        return Err((ERR_INVALID_PARAMS, "keys array is empty".into()));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err((ERR_INTERNAL, "atlas_key_combo is currently macOS-only".into()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let (modifiers, key) = split_combo(&keys);
+        let using_clause = if modifiers.is_empty() {
+            String::new()
+        } else if modifiers.len() == 1 {
+            format!(" using {}", modifiers[0])
+        } else {
+            format!(" using {{{}}}", modifiers.join(", "))
+        };
+        // Special keys go through `key code N`; everything else uses
+        // `keystroke "x"`. Build raw AppleScript and run via osascript -e.
+        let script = if let Some(code) = special_key_code(&key) {
+            format!(
+                "tell application \"System Events\" to key code {code}{using_clause}"
+            )
+        } else {
+            // Embed the key as an AppleScript string literal — escape quotes
+            // and backslashes.
+            let escaped = key.replace('\\', "\\\\").replace('"', "\\\"");
+            format!(
+                "tell application \"System Events\" to keystroke \"{escaped}\"{using_clause}"
+            )
+        };
+        let output = tokio::process::Command::new("osascript")
+            .args(["-e", &script])
+            .output()
+            .await
+            .map_err(|e| (ERR_INTERNAL, format!("spawn osascript: {e}")))?;
+        if !output.status.success() {
+            return Err((
+                ERR_INTERNAL,
+                format!(
+                    "osascript failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ));
+        }
+        ok_text(&json!({ "ok": true, "keys": keys }))
+    }
+}
+
+async fn click(args: &Value) -> Result<Value, (i32, String)> {
+    let x = args
+        .get("x")
+        .and_then(Value::as_f64)
+        .ok_or((ERR_INVALID_PARAMS, "missing x (number)".into()))?;
+    let y = args
+        .get("y")
+        .and_then(Value::as_f64)
+        .ok_or((ERR_INVALID_PARAMS, "missing y (number)".into()))?;
+    let button = args
+        .get("button")
+        .and_then(Value::as_str)
+        .unwrap_or("left");
+    if button != "left" && button != "right" {
+        return Err((ERR_INVALID_PARAMS, format!("unknown button: {button}")));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err((ERR_INTERNAL, "atlas_click is currently macOS-only".into()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // CGEvent type constants. left = down 1 / up 2; right = down 3 / up 4.
+        let (down, up) = if button == "right" { (3, 4) } else { (1, 2) };
+        let script = format!(
+            r#"
+ObjC.import("CoreGraphics");
+var loc = $.CGPointMake({x}, {y});
+$.CGEventPost(0, $.CGEventCreateMouseEvent($(), {down}, loc, 0));
+$.CGEventPost(0, $.CGEventCreateMouseEvent($(), {up}, loc, 0));
+JSON.stringify({{ ok: true, x: {x}, y: {y}, button: "{button}" }});
 "#
         );
         let result = run_jxa(&script).await?;
