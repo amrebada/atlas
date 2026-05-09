@@ -491,10 +491,13 @@ export function TerminalStrip({
         </DragOverlay>
       </DndContext>
 
-      {/* Pane area — every group is mounted so PTYs and xterm scrollback in
-          inactive groups stay alive. Only the active group is visible; the
-          others sit at `display:none`. The same trick is used by the
-          per-group `tabs` sub-layout for non-active panes. */}
+      {/* Pane area — every group is mounted so PTYs in inactive groups
+          keep streaming. We toggle `visibility` (not `display`) so each
+          xterm.js renderer keeps its layout box and continues drawing to
+          its canvas in the background; switching groups then just
+          composites a different layer instead of waking a paused
+          renderer. The same trick is used by the per-group `tabs`
+          sub-layout for non-active panes. */}
       <div
         style={{
           flex: 1,
@@ -513,11 +516,14 @@ export function TerminalStrip({
           return (
             <div
               key={g.id}
+              aria-hidden={!visible}
               style={{
                 position: "absolute",
                 inset: 0,
-                display: visible ? "flex" : "none",
+                display: "flex",
                 flexDirection: "column",
+                visibility: visible ? "visible" : "hidden",
+                zIndex: visible ? 1 : 0,
               }}
             >
               <PaneArea
@@ -588,10 +594,12 @@ function PaneArea({
             }
           : gridContainerStyle(panes.length);
 
-  // Tabs layout shows a single pane with the others kept mounted at
-  // `display:none`. There is no visible spatial relationship to drag, so
-  // this layout opts out of pane-area DnD - reordering is still available
-  // via the tab strip above.
+  // Tabs layout shows a single pane on top with the others kept mounted
+  // and laid out underneath; we toggle `visibility` so xterm's renderer
+  // keeps painting in the background and the new tab is current the
+  // moment it's composited. There is no visible spatial relationship to
+  // drag, so this layout opts out of pane-area DnD — reordering is still
+  // available via the tab strip above.
   if (layout === "tabs") {
     return (
       <div style={containerStyle}>
@@ -600,12 +608,15 @@ function PaneArea({
           return (
             <div
               key={p.id}
+              aria-hidden={!isActive}
               style={{
                 position: "absolute",
                 inset: 0,
-                display: isActive ? "flex" : "none",
+                display: "flex",
                 flexDirection: "column",
                 background: "var(--bg)",
+                visibility: isActive ? "visible" : "hidden",
+                zIndex: isActive ? 1 : 0,
               }}
             >
               <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
