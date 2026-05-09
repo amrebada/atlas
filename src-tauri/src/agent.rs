@@ -22,7 +22,8 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio_tungstenite::tungstenite::{
     client::IntoClientRequest,
     protocol::{frame::coding::CloseCode, CloseFrame},
@@ -119,7 +120,7 @@ async fn connect_once(app: &AppHandle, url: &str, token: &str) -> anyhow::Result
     tracing::info!(status = %response.status(), "agent connected to relay");
     let _ = app.emit(
         "agent:status",
-        serde_json::json!({ "state": "connected", "url": url }),
+        json!({ "state": "connected", "url": url }),
     );
 
     let hello = OutboundMessage::Hello {
@@ -129,14 +130,22 @@ async fn connect_once(app: &AppHandle, url: &str, token: &str) -> anyhow::Result
     let hello_json = serde_json::to_string(&hello)?;
     ws.send(Message::Text(hello_json.into())).await?;
 
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()?;
+
     while let Some(msg) = ws.next().await {
         match msg? {
             Message::Text(text) => {
-                tracing::info!(text = %text, "agent received text message");
-                let _ = app.emit(
-                    "agent:message",
-                    serde_json::json!({ "text": text.as_str() }),
-                );
+                let s = text.as_str();
+                tracing::info!(text = %s, "agent received text message");
+                let _ = app.emit("agent:message", json!({ "text": s }));
+                if let Some(reply) = handle_text(app, &http, s).await {
+                    if let Err(e) = ws.send(Message::Text(reply.into())).await {
+                        tracing::warn!(error = %e, "agent: send reply failed");
+                        break;
+                    }
+                }
             }
             Message::Binary(bytes) => {
                 tracing::info!(bytes = bytes.len(), "agent received binary frame");
@@ -159,4 +168,108 @@ async fn connect_once(app: &AppHandle, url: &str, token: &str) -> anyhow::Result
         }
     }
     Ok(())
+}
+
+/// Try to decode an inbound text frame as an envelope and produce a reply.
+/// Returns `None` for envelopes that don't need a reply (unknown types,
+/// malformed JSON, etc — those are already logged via the emit above).
+async fn handle_text(app: &AppHandle, http: &reqwest::Client, text: &str) -> Option<String> {
+    let envelope: Value = match serde_json::from_str(text) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "agent: ignoring non-JSON message");
+            return None;
+        }
+    };
+
+    let envelope_type = envelope.get("type").and_then(Value::as_str);
+    if envelope_type != Some("rpc") {
+        // Future types: "ping", "approval", etc. For now non-rpc envelopes
+        // are silently dropped — the UI already saw them via agent:message.
+        return None;
+    }
+
+    let env_id = envelope.get("id").cloned().unwrap_or(Value::Null);
+    let rpc_request = match envelope.get("request") {
+        Some(r) => r.clone(),
+        None => {
+            return Some(error_reply(
+                &env_id,
+                "envelope missing `request` field (the JSON-RPC payload)",
+            ));
+        }
+    };
+
+    // Resolve the loopback MCP endpoint from settings on every call. Reading
+    // it on every message is cheap and means a settings change between
+    // requests is picked up immediately.
+    let app_data = match app.path().app_data_dir() {
+        Ok(p) => p.join("atlas"),
+        Err(e) => {
+            return Some(error_reply(&env_id, &format!("resolve app_data_dir: {e}")));
+        }
+    };
+    let settings = match crate::storage::settings::load(&app_data).await {
+        Ok(s) => s,
+        Err(e) => {
+            return Some(error_reply(&env_id, &format!("load settings: {e}")));
+        }
+    };
+    let mcp = settings.advanced.mcp;
+    if !mcp.enabled || mcp.token.is_empty() {
+        return Some(error_reply(
+            &env_id,
+            "MCP server is not enabled — toggle on in Settings → Advanced and restart Atlas",
+        ));
+    }
+
+    let url = format!("http://127.0.0.1:{}/mcp", mcp.port);
+    let response = match http
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", mcp.token))
+        .json(&rpc_request)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return Some(error_reply(&env_id, &format!("MCP HTTP call failed: {e}"))),
+    };
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Some(error_reply(
+            &env_id,
+            &format!("MCP returned {status}: {body}"),
+        ));
+    }
+    let body: Value = match response.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            return Some(error_reply(
+                &env_id,
+                &format!("MCP non-JSON response: {e}"),
+            ));
+        }
+    };
+
+    let reply = json!({
+        "type": "rpc",
+        "id": env_id,
+        "response": body,
+    });
+    serde_json::to_string(&reply).ok()
+}
+
+fn error_reply(env_id: &Value, message: &str) -> String {
+    serde_json::to_string(&json!({
+        "type": "rpc",
+        "id": env_id,
+        "response": {
+            "jsonrpc": "2.0",
+            "id": null,
+            "error": { "code": -32603, "message": message }
+        }
+    }))
+    .unwrap_or_else(|_| "{}".into())
 }

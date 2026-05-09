@@ -121,5 +121,9 @@ base64 = "0.22"
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 
+# HTTP client for the agent → loopback MCP server hop. Already pulled in
+# transitively by tauri-plugin-updater; this just makes the dep explicit.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
 [dev-dependencies]
 tempfile = "3"
