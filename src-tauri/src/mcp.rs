@@ -992,9 +992,9 @@ async fn call_tool(state: &McpState, params: &Value) -> Result<Value, (i32, Stri
         "atlas_git_commit" => git_commit(state, &args).await,
         "atlas_git_push" => git_push(state, &args).await,
         "atlas_take_screenshot" => take_screenshot(state, &args).await,
-        "atlas_list_screens" => list_screens(&args).await,
-        "atlas_list_windows" => list_windows(&args).await,
-        "atlas_get_active_window" => get_active_window(&args).await,
+        "atlas_list_screens" => list_screens(state, &args).await,
+        "atlas_list_windows" => list_windows(state, &args).await,
+        "atlas_get_active_window" => get_active_window(state, &args).await,
         "atlas_focus_window" => focus_window(state, &args).await,
         "atlas_type_text" => type_text(&args).await,
         "atlas_key_combo" => key_combo(&args).await,
@@ -1482,6 +1482,11 @@ fn current_branch(cwd: &std::path::Path) -> Option<String> {
 /// JavaScript-for-Automation flavor of osascript — it can call ObjC/CG
 /// APIs directly via the bridge, which lets us use `CGWindowListCopyWindowInfo`
 /// and `NSScreen.screens` without adding a Rust FFI crate.
+///
+/// Kept as a fallback for `run_helper` (Phase 3.4 Swift sidecar) — JXA's
+/// AX-tree path doesn't see Chrome / VSCode windows on macOS 26, but it
+/// still works if the sidecar binary is missing or the user hasn't
+/// granted Screen Recording to it yet.
 #[cfg(target_os = "macos")]
 async fn run_jxa(script: &str) -> Result<Value, (i32, String)> {
     let output = tokio::process::Command::new("osascript")
@@ -1498,13 +1503,65 @@ async fn run_jxa(script: &str) -> Result<Value, (i32, String)> {
         .map_err(|e| (ERR_INTERNAL, format!("parse JXA output: {e} — got: {stdout}")))
 }
 
-async fn list_screens(_args: &Value) -> Result<Value, (i32, String)> {
+/// Outcome of trying to run the Swift sidecar. We distinguish "binary
+/// can't be reached" (silently fall back to JXA) from "binary ran and
+/// reported an error" (surface to the caller — usually a permission
+/// problem the user has to fix).
+#[cfg(target_os = "macos")]
+enum HelperResult {
+    Ok(Value),
+    /// Binary couldn't be located or spawned. Fall back to JXA.
+    Unavailable(String),
+    /// Binary ran but failed (non-zero exit, bad JSON, …). Don't fall
+    /// back — show the error so the user knows to fix it.
+    Failed(String),
+}
+
+/// Run the atlas-helper Swift sidecar with one subcommand and parse its
+/// stdout as JSON. The helper uses ScreenCaptureKit's `SCShareableContent`
+/// — the modern API that sees every on-screen window (including Chrome /
+/// VSCode, which the JXA AX-tree path misses on macOS 26+).
+#[cfg(target_os = "macos")]
+async fn run_helper(app: &AppHandle, subcommand: &str) -> HelperResult {
+    use tauri_plugin_shell::ShellExt;
+    let cmd = match app.shell().sidecar("atlas-helper") {
+        Ok(c) => c,
+        Err(e) => return HelperResult::Unavailable(format!("locate sidecar: {e}")),
+    };
+    let output = match cmd.args([subcommand]).output().await {
+        Ok(o) => o,
+        Err(e) => return HelperResult::Unavailable(format!("spawn sidecar: {e}")),
+    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        eprintln!("[mcp] atlas-helper {subcommand} failed: {stderr}");
+        return HelperResult::Failed(stderr);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match serde_json::from_str(stdout.trim()) {
+        Ok(v) => HelperResult::Ok(v),
+        Err(e) => HelperResult::Failed(format!("parse helper output: {e} — got: {stdout}")),
+    }
+}
+
+async fn list_screens(state: &McpState, _args: &Value) -> Result<Value, (i32, String)> {
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = state;
         return Err((ERR_INTERNAL, "atlas_list_screens is currently macOS-only".into()));
     }
     #[cfg(target_os = "macos")]
     {
+        // Try the Swift sidecar first; fall back to JXA only if the
+        // sidecar binary is missing entirely. If it ran but failed,
+        // surface the error so the user knows to fix it.
+        match run_helper(&state.app, "list-screens").await {
+            HelperResult::Ok(screens) => return ok_text(&screens),
+            HelperResult::Failed(msg) => {
+                return Err((ERR_INTERNAL, format!("atlas-helper list-screens: {msg}")))
+            }
+            HelperResult::Unavailable(_) => {} // fall through to JXA
+        }
         // Returns frames in BOTH coordinate systems so callers don't have
         // to convert. `frame` matches NSScreen (bottom-left origin, y grows
         // up). `cgFrame` matches CGEvent / CGEventPost — same space the
@@ -1543,23 +1600,44 @@ JSON.stringify(out);
     }
 }
 
-async fn list_windows(args: &Value) -> Result<Value, (i32, String)> {
+async fn list_windows(state: &McpState, args: &Value) -> Result<Value, (i32, String)> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = args;
+        let _ = (state, args);
         return Err((ERR_INTERNAL, "atlas_list_windows is currently macOS-only".into()));
     }
     #[cfg(target_os = "macos")]
     {
         let _ = args;
+        // Phase 3.4: prefer the Swift `atlas-helper` sidecar — it uses
+        // SCShareableContent and sees every on-screen window, including
+        // Chrome / VSCode (which the JXA AX-tree path can't introspect on
+        // macOS 26+ because those apps disable AX for their renderer
+        // processes). Fall back to JXA only if the sidecar binary is
+        // missing entirely (Unavailable). If it ran but failed (Failed)
+        // — typically Screen Recording denied — surface the error so the
+        // user can fix it instead of silently returning a worse list.
+        match run_helper(&state.app, "list-windows").await {
+            HelperResult::Ok(windows) => return ok_text(&windows),
+            HelperResult::Failed(msg) => {
+                return Err((
+                    ERR_INTERNAL,
+                    format!(
+                        "atlas-helper list-windows: {msg}\n\nGrant Screen Recording to \
+                         `target/debug/atlas-helper` (or the bundled atlas-helper for \
+                         packaged builds) in System Settings → Privacy & Security → \
+                         Screen Recording, then quit Atlas and relaunch."
+                    ),
+                ))
+            }
+            HelperResult::Unavailable(_) => {} // fall through to JXA
+        }
         // History note: this used `CGWindowListCopyWindowInfo`, which on
         // macOS 26+ returns nil for unprivileged callers (Apple gated the
-        // unentitled path; the modern replacement is ScreenCaptureKit's
-        // `SCShareableContent`, but JXA can't import that framework). The
-        // remaining cross-version-friendly option is the AppleScript
+        // unentitled path). The JXA fallback below uses the AppleScript
         // System Events bridge — same data, but it requires *Accessibility*
-        // permission (System Settings → Privacy & Security → Accessibility,
-        // toggle on for Atlas / target/debug/atlas).
+        // permission AND apps that disable their AX tree (Chrome, VSCode)
+        // remain invisible. Use the sidecar.
         let script = r#"
 var se = Application("System Events");
 var procs = se.processes.whose({ visible: true })();
@@ -1607,13 +1685,21 @@ JSON.stringify(out);
     }
 }
 
-async fn get_active_window(_args: &Value) -> Result<Value, (i32, String)> {
+async fn get_active_window(state: &McpState, _args: &Value) -> Result<Value, (i32, String)> {
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = state;
         return Err((ERR_INTERNAL, "atlas_get_active_window is currently macOS-only".into()));
     }
     #[cfg(target_os = "macos")]
     {
+        match run_helper(&state.app, "get-active-window").await {
+            HelperResult::Ok(active) => return ok_text(&active),
+            HelperResult::Failed(msg) => {
+                return Err((ERR_INTERNAL, format!("atlas-helper get-active-window: {msg}")))
+            }
+            HelperResult::Unavailable(_) => {} // fall through to JXA
+        }
         let script = r#"
 var se = Application("System Events");
 var procs = se.processes.whose({ frontmost: true })();

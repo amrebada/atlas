@@ -4,9 +4,9 @@
   "version": "1.0.15",
   "identifier": "com.atlas.desktop",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm helper:build && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm helper:build:universal && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -35,6 +35,7 @@
     "active": true,
     "targets": ["dmg", "app", "appimage", "deb", "msi", "nsis"],
     "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/atlas-helper"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

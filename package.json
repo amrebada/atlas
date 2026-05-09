@@ -14,7 +14,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "helper:build": "src-tauri/sidecars/atlas-helper/build.sh",
+    "helper:build:universal": "src-tauri/sidecars/atlas-helper/build.sh --universal"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
