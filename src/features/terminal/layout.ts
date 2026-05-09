@@ -28,6 +28,10 @@ interface TerminalState {
   maxed: boolean;
   // When true, the strip collapses to just its top bar (tabs + toolbar)
   collapsed: boolean;
+  // User-set strip height in pixels, or null to fall back to the
+  // viewport-relative default (40vh). Lets a user drag the strip larger
+  // when they're running TUIs that need more rows than the default cap.
+  stripHeight: number | null;
 
   // Append a pane + auto-focus it inside the active group. Promotes that
   // group's tabs → grid when its pane count crosses 2.
@@ -37,6 +41,7 @@ interface TerminalState {
   setLayout: (l: LayoutMode) => void;
   setMaxed: (b: boolean) => void;
   setCollapsed: (b: boolean) => void;
+  setStripHeight: (height: number | null) => void;
   setActive: (id: PaneId | null) => void;
   patchPane: (id: PaneId, patch: Partial<Pane>) => void;
   patchPaneStatus: (id: PaneId, status: PaneStatus) => void;
@@ -88,6 +93,7 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   activeGroupId: DEFAULT_GROUP_ID,
   maxed: false,
   collapsed: false,
+  stripHeight: null,
 
   addPane: (pane) =>
     set((s) => {
@@ -164,6 +170,7 @@ export const useTerminalStore = create<TerminalState>((set) => ({
     set(maxed ? { maxed: true, collapsed: false } : { maxed: false }),
   setCollapsed: (collapsed) =>
     set(collapsed ? { collapsed: true, maxed: false } : { collapsed: false }),
+  setStripHeight: (stripHeight) => set({ stripHeight }),
   setActive: (paneId) =>
     set((s) => {
       if (paneId == null) {

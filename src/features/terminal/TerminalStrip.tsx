@@ -81,7 +81,47 @@ export function TerminalStrip({
   const setActiveGroup = useTerminalStore((s) => s.setActiveGroup);
   const renameGroup = useTerminalStore((s) => s.renameGroup);
   const movePaneToGroup = useTerminalStore((s) => s.movePaneToGroup);
+  const stripHeight = useTerminalStore((s) => s.stripHeight);
+  const setStripHeight = useTerminalStore((s) => s.setStripHeight);
   const pushToast = useUiStore((s) => s.pushToast);
+
+  const [resizing, setResizing] = useState(false);
+
+  // Drag the top edge to grow/shrink the strip. Default is 40vh; the
+  // user can pull it up to ~95vh when running TUIs that need a lot of
+  // rows. A double-click resets to the default.
+  const startResize = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const startY = e.clientY;
+      const initial =
+        stripHeight != null ? stripHeight : window.innerHeight * 0.4;
+      setResizing(true);
+      document.body.style.cursor = "ns-resize";
+      document.body.style.userSelect = "none";
+      const onMove = (ev: PointerEvent) => {
+        const delta = startY - ev.clientY;
+        const max = window.innerHeight * 0.95;
+        const next = Math.max(120, Math.min(max, initial + delta));
+        setStripHeight(next);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        setResizing(false);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [stripHeight, setStripHeight],
+  );
+
+  const resetHeight = useCallback(() => {
+    setStripHeight(null);
+  }, [setStripHeight]);
 
   // Pane being dragged — used to (a) draw a DragOverlay so the tab keeps
   // following the cursor when it leaves the SortableContext, (b) hide
@@ -284,19 +324,47 @@ export function TerminalStrip({
           flexShrink: 0,
         }
       : {
-          // Cap at 40% of available vertical space. We resolve percentage via
-          height: "40vh",
-          minHeight: 200,
-          maxHeight: "60vh",
+          // Default 40vh, but user-resizable via the top-edge handle
+          // below. Hard cap at 95vh so the strip can't completely
+          // swallow the chrome above it.
+          height: stripHeight != null ? stripHeight : "40vh",
+          minHeight: 120,
+          maxHeight: "95vh",
           borderTop: "1px solid var(--line)",
           background: "var(--surface)",
           display: "flex",
           flexDirection: "column",
           minWidth: 0,
+          position: "relative",
         };
 
   return (
     <div style={stripStyle}>
+      {/* Top-edge resize handle. Drag up to grow, down to shrink, or
+          double-click to restore the 40vh default. Hidden when the
+          strip is in a fixed-size mode (maxed / collapsed). */}
+      {!maxed && !collapsed && (
+        <div
+          onPointerDown={startResize}
+          onDoubleClick={resetHeight}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize terminal strip"
+          title="Drag to resize · double-click to reset"
+          style={{
+            position: "absolute",
+            top: -3,
+            left: 0,
+            right: 0,
+            height: 6,
+            cursor: "ns-resize",
+            background: resizing ? "var(--accent)" : "transparent",
+            zIndex: 50,
+            touchAction: "none",
+          }}
+        />
+      )}
+
       {/* The DndContext spans GroupsBar + tab strip so dragging a pane tab
           onto a group chip moves the pane between groups. PaneArea owns
           its own DndContext (split-layout reorders) — those drags never
