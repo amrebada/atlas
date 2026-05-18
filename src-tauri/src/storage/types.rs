@@ -1041,3 +1041,168 @@ pub struct PlannerState {
     #[serde(default)]
     pub score_snapshots: Vec<ScoreSnapshot>,
 }
+
+// ---------- Atlas Pilot ----------
+//
+// State for an automated-project-lifecycle ("pilot") project. Persisted as
+// per-project JSON under `<project>/.atlas/pilot/` — see `storage::pilot_io`.
+
+fn default_auto_advance() -> bool {
+    true
+}
+
+/// Lifecycle status of a pilot project as a whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "lowercase"
+)]
+pub enum PilotStatus {
+    /// Planning in progress — grill-me / PRD / epics not yet approved.
+    Draft,
+    /// Planning approved; epics being implemented.
+    Active,
+    /// Every epic complete.
+    Done,
+}
+
+/// Which planning gate a draft pilot is currently waiting on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "lowercase"
+)]
+pub enum PilotGate {
+    Reqs,
+    Prd,
+    Epics,
+}
+
+/// `.atlas/pilot/project.json` — Atlas-owned pilot project record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct PilotProject {
+    pub name: String,
+    pub status: PilotStatus,
+    /// Current planning gate; `None` once `status` is `Active`/`Done`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<PilotGate>,
+    /// Always true today (decision: auto-advance always). Kept as a field
+    /// so the orchestrator can read it without a special-case.
+    #[serde(default = "default_auto_advance")]
+    pub auto_advance: bool,
+    /// Claude session id of the planning session, once spawned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning_session_id: Option<String>,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
+}
+
+/// Implementation status of a single epic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "lowercase"
+)]
+pub enum EpicStatus {
+    Pending,
+    Active,
+    Interrupted,
+    Done,
+}
+
+/// One task within an epic's task list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct EpicTask {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub done: bool,
+}
+
+/// `.atlas/pilot/epics/NN.json` — one epic. The skill writes it at the
+/// epics gate; Atlas mutates `status`, `session_id`, `iterations`,
+/// `tasks[].done` thereafter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct Epic {
+    #[ts(type = "number")]
+    pub number: i64,
+    pub title: String,
+    pub goal: String,
+    #[serde(default)]
+    pub description: String,
+    /// Release group id; epics sharing one run in a single session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<String>,
+    pub status: EpicStatus,
+    /// Epic numbers this epic depends on.
+    #[serde(default)]
+    #[ts(type = "number[]")]
+    pub depends_on: Vec<i64>,
+    #[serde(default)]
+    pub tasks: Vec<EpicTask>,
+    /// Claude session id implementing this epic, once spawned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Task-checkpoint cycles run so far (one per `continue`).
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub iterations: i64,
+}
+
+/// Kind of a `history.jsonl` entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "lowercase"
+)]
+pub enum HistoryKind {
+    Task,
+    Mod,
+    Question,
+    Epic,
+}
+
+/// One line of `.atlas/pilot/epics/NN/history.jsonl`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct HistoryEntry {
+    /// ISO-8601 UTC timestamp.
+    pub ts: String,
+    pub kind: HistoryKind,
+    pub summary: String,
+    #[serde(default)]
+    pub files: Vec<String>,
+    #[serde(default)]
+    pub rationale: String,
+}

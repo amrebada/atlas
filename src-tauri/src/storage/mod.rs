@@ -6,6 +6,7 @@ pub mod db;
 pub mod discovery;
 pub mod json;
 pub mod migrate;
+pub mod pilot_io;
 pub mod planner_io;
 pub mod settings;
 pub mod sync;
@@ -25,6 +26,8 @@ pub use types::{
     RoutineId, RoutineInstance, RoutineInstanceId, ScoreSnapshot, Script, ScriptGroup, ScriptId,
     Session, SessionId, SessionStatus, Settings, Template, TemplateId, Theme, TimelineConfig, Todo,
     TodoId, WatchRoot,
+    // Atlas Pilot
+    Epic, EpicStatus, EpicTask, HistoryEntry, HistoryKind, PilotGate, PilotProject, PilotStatus,
 };
 
 /// Bundle of long-lived resources the settings + templates commands need.

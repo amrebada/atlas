@@ -12,6 +12,7 @@ pub mod milestones;
 pub mod notes;
 pub mod palette;
 pub mod pane_layout;
+pub mod pilot;
 pub mod planner;
 pub mod projects;
 pub mod providers;

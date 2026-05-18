@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -206,6 +206,51 @@ fn newest_jsonl(dir: &Path) -> anyhow::Result<Option<PathBuf>> {
         }
     }
     Ok(newest.map(|(_, p)| p))
+}
+
+/// Find the transcript file of a freshly-spawned `claude` session running in
+/// `project_path`. Scans every `~/.claude/projects/*/` slug dir for a
+/// `.jsonl` modified at or after `since` whose recorded `cwd` matches the
+/// project, and returns the newest match.
+///
+/// Used by the pilot orchestrator to bind to the session it just launched
+/// without having to reproduce Claude Code's slug-encoding scheme.
+pub fn find_session_for_project(project_path: &Path, since: SystemTime) -> Option<PathBuf> {
+    let root = claude_projects_root()?;
+    let canon = canonicalize_or_self(project_path);
+    // Tolerate a little clock skew between our `since` and file mtimes.
+    let cutoff = since.checked_sub(Duration::from_secs(3)).unwrap_or(since);
+
+    let mut best: Option<(SystemTime, PathBuf)> = None;
+    for slug in std::fs::read_dir(&root).ok()?.flatten() {
+        let slug_dir = slug.path();
+        if !slug_dir.is_dir() {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(&slug_dir) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let path = f.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(mtime) = f.metadata().and_then(|m| m.modified()) else {
+                continue;
+            };
+            if mtime < cutoff {
+                continue;
+            }
+            match read_cwd_from_file(&path) {
+                Ok(Some(cwd)) if paths_equal(&cwd, &canon) => match &best {
+                    Some((t, _)) if *t >= mtime => {}
+                    _ => best = Some((mtime, path)),
+                },
+                _ => {}
+            }
+        }
+    }
+    best.map(|(_, p)| p)
 }
 
 // ---------- Single-file parser ----------

@@ -50,6 +50,15 @@ isHead: boolean,
 isRemote: boolean, };
 
 /**
+ * One conversational message extracted from a session transcript.
+ */
+export type ChatMessage = { 
+/**
+ * `"user"` or `"assistant"`.
+ */
+role: string, text: string, };
+
+/**
  * Clone depth - `number | 'full'` in TS. Encoded here as a tagged enum
  */
 export type CloneDepth = number | FullLiteral;
@@ -123,6 +132,39 @@ export type DiskScanResult = { totalBytes: number, totalSize: string, entries: A
 export type EditorEntry = { id: string, name: string, cmd: string, present: boolean, };
 
 export type EditorsSettings = { detected: Array<EditorEntry>, defaultId: string | null, };
+
+/**
+ * `.atlas/pilot/epics/NN.json` — one epic. The skill writes it at the
+ * epics gate; Atlas mutates `status`, `session_id`, `iterations`,
+ * `tasks[].done` thereafter.
+ */
+export type Epic = { number: number, title: string, goal: string, description: string, 
+/**
+ * Release group id; epics sharing one run in a single session.
+ */
+release: string | null, status: EpicStatus, 
+/**
+ * Epic numbers this epic depends on.
+ */
+dependsOn: number[], tasks: Array<EpicTask>, 
+/**
+ * Claude session id implementing this epic, once spawned.
+ */
+sessionId: string | null, 
+/**
+ * Task-checkpoint cycles run so far (one per `continue`).
+ */
+iterations: number, };
+
+/**
+ * Implementation status of a single epic.
+ */
+export type EpicStatus = "pending" | "active" | "interrupted" | "done";
+
+/**
+ * One task within an epic's task list.
+ */
+export type EpicTask = { id: string, title: string, done: boolean, };
 
 /**
  * One entry in a Milestone or Routine's `extensions` log. The shape is
@@ -236,6 +278,20 @@ export type Goal = { "kind": "count", target: number,
  */
 completed: number, } | { "kind": "deadline", until: string, } | { "kind": "indefinite" };
 
+/**
+ * One line of `.atlas/pilot/epics/NN/history.jsonl`.
+ */
+export type HistoryEntry = { 
+/**
+ * ISO-8601 UTC timestamp.
+ */
+ts: string, kind: HistoryKind, summary: string, files: Array<string>, rationale: string, };
+
+/**
+ * Kind of a `history.jsonl` entry.
+ */
+export type HistoryKind = "task" | "mod" | "question" | "epic";
+
 export type Lang = "TypeScript" | "JavaScript" | "Rust" | "Go" | "Python" | "Swift" | "Kotlin" | "Ruby" | "Java" | "C" | "C++" | "Other";
 
 export type McpSettings = { enabled: boolean, port: number, 
@@ -338,6 +394,60 @@ export type PaneSnapshot = { id: string,
 kind: string, title: string, cwd: string, scriptId: string | null, sessionId: string | null, };
 
 export type PaneStatus = "idle" | "running" | "active" | "error";
+
+/**
+ * Everything the Pilot window renders for one project.
+ */
+export type PilotDetail = { path: string, project: PilotProject, epics: Array<Epic>, 
+/**
+ * Whether a `claude` session is live for this project right now.
+ */
+running: boolean, 
+/**
+ * Whether that run is currently paused.
+ */
+paused: boolean, 
+/**
+ * PTY pane id of the live session — used to embed the terminal.
+ */
+paneId: string | null, };
+
+/**
+ * Which planning gate a draft pilot is currently waiting on.
+ */
+export type PilotGate = "reqs" | "prd" | "epics";
+
+/**
+ * `.atlas/pilot/project.json` — Atlas-owned pilot project record.
+ */
+export type PilotProject = { name: string, status: PilotStatus, 
+/**
+ * Current planning gate; `None` once `status` is `Active`/`Done`.
+ */
+gate: PilotGate | null, 
+/**
+ * Always true today (decision: auto-advance always). Kept as a field
+ * so the orchestrator can read it without a special-case.
+ */
+autoAdvance: boolean, 
+/**
+ * Claude session id of the planning session, once spawned.
+ */
+planningSessionId: string | null, 
+/**
+ * ISO-8601 creation timestamp.
+ */
+createdAt: string, };
+
+/**
+ * Lifecycle status of a pilot project as a whole.
+ */
+export type PilotStatus = "draft" | "active" | "done";
+
+/**
+ * One row in the Pilot window's project list.
+ */
+export type PilotSummary = { path: string, name: string, status: PilotStatus, };
 
 /**
  * Global planner state — pause flag, last notification bookkeeping,

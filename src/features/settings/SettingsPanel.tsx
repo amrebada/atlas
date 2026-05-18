@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -1295,6 +1296,68 @@ function ShortcutsSection({ settings }: { settings?: Settings }) {
   );
 }
 
+function PilotCard({
+  pushToast,
+}: {
+  pushToast: (kind: "success" | "error", message: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const openWindow = async () => {
+    try {
+      await invoke("pilot_open_window");
+    } catch (e) {
+      pushToast("error", `Could not open Atlas Pilot: ${String(e)}`);
+    }
+  };
+
+  const installSkill = async () => {
+    setBusy(true);
+    try {
+      const dir = await invoke<string>("pilot_install_skill");
+      pushToast("success", `atlas skill installed to ${dir}`);
+    } catch (e) {
+      pushToast("error", `Install failed: ${String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div
+        style={{
+          marginTop: 22,
+          marginBottom: 8,
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          color: "var(--text-dim)",
+        }}
+      >
+        Atlas Pilot
+      </div>
+      <SettingsRow
+        label="Pilot window"
+        hint="Automated project lifecycle — plan, then build epic by epic"
+      >
+        <button onClick={openWindow} style={GHOST_BTN}>
+          Open Atlas Pilot
+        </button>
+      </SettingsRow>
+      <SettingsRow
+        label="atlas skill"
+        hint="Installs the atlas skill into ~/.claude/skills/ — required for pilot sessions"
+      >
+        <button onClick={installSkill} disabled={busy} style={GHOST_BTN}>
+          {busy ? "Installing…" : "Install atlas skill"}
+        </button>
+      </SettingsRow>
+    </>
+  );
+}
+
 function AdvancedSection({ settings }: { settings?: Settings }) {
   const queryClient = useQueryClient();
   const pushToast = useUiStore((s) => s.pushToast);
@@ -1475,6 +1538,8 @@ function AdvancedSection({ settings }: { settings?: Settings }) {
       />
 
       <AgentPairingCard />
+
+      <PilotCard pushToast={pushToast} />
 
       <div style={{ marginTop: 22 }}>
         <button

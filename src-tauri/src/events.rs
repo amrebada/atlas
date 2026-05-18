@@ -98,6 +98,16 @@ pub fn emit_planner(app: &AppHandle, channel: &str, payload: &str) -> anyhow::Re
         .map_err(|e| anyhow::anyhow!("emit {channel}: {e}"))
 }
 
+/// Emit `pilot:changed { project }`. The Pilot window refetches its
+/// project/epics/history queries when it sees this.
+pub fn emit_pilot(app: &AppHandle, project_path: &str) -> anyhow::Result<()> {
+    app.emit(
+        "pilot:changed",
+        serde_json::json!({ "project": project_path }),
+    )
+    .map_err(|e| anyhow::anyhow!("emit pilot:changed: {e}"))
+}
+
 /// Emit `git:status { id, dirty, ahead, behind, branch, author? }`.
 pub fn emit_git_status(app: &AppHandle, id: &str, status: &GitStatus) -> anyhow::Result<()> {
     app.emit(

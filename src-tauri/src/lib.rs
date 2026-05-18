@@ -16,6 +16,7 @@ mod ics_builder;
 mod mcp;
 mod metrics;
 mod path_bootstrap;
+mod pilot;
 pub mod providers;
 mod routine_engine;
 mod score_engine;
@@ -30,6 +31,7 @@ mod watcher;
 use providers::ProvidersRegistry;
 use sessions::SessionsManager;
 use std::sync::Arc;
+use pilot::PilotManager;
 use storage::sync::SyncWorker;
 use storage::{AppContext, Db};
 use terminal::TerminalManager;
@@ -121,6 +123,8 @@ pub fn run() {
             app.manage(ctx);
             app.manage(terminal);
             app.manage(sync_worker);
+            // Atlas Pilot orchestrator — drives wrapped `claude` sessions.
+            app.manage(PilotManager::new(app.handle().clone()));
 
             // Approval registry — shared between the MCP server (which
             // emits requests) and the Tauri command (which the UI calls
@@ -289,6 +293,23 @@ pub fn run() {
             commands::mcp::mcp_approval_resolve,
             commands::agent::agent_pairing_info,
             commands::agent::agent_pair_envelope,
+            commands::pilot::pilot_create,
+            commands::pilot::pilot_list,
+            commands::pilot::pilot_get,
+            commands::pilot::pilot_history,
+            commands::pilot::pilot_transcript,
+            commands::pilot::pilot_artifact_read,
+            commands::pilot::pilot_artifact_write,
+            commands::pilot::pilot_approve_gate,
+            commands::pilot::pilot_send_message,
+            commands::pilot::pilot_pause,
+            commands::pilot::pilot_resume,
+            commands::pilot::pilot_interrupt,
+            commands::pilot::pilot_start_planning,
+            commands::pilot::pilot_start_epic,
+            commands::pilot::pilot_resume_run,
+            commands::pilot::pilot_open_window,
+            commands::pilot::pilot_install_skill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Atlas");
