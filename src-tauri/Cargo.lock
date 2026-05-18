@@ -236,7 +236,7 @@ dependencies = [
 
 [[package]]
 name = "atlas"
-version = "1.0.15"
+version = "1.0.17"
 dependencies = [
  "anyhow",
  "axum",
