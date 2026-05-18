@@ -125,6 +125,19 @@ pub fn run() {
             app.manage(sync_worker);
             // Atlas Pilot orchestrator — drives wrapped `claude` sessions.
             app.manage(PilotManager::new(app.handle().clone()));
+            // Resume any epic that was mid-run when Atlas last closed.
+            // Deferred onto the async runtime so the orchestrator's
+            // `tokio::spawn` has a runtime context and the app has settled.
+            {
+                let app_handle = app.handle().clone();
+                let pilot_data_dir = app_data.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    app_handle
+                        .state::<PilotManager>()
+                        .resume_all(&pilot_data_dir);
+                });
+            }
 
             // Approval registry — shared between the MCP server (which
             // emits requests) and the Tauri command (which the UI calls

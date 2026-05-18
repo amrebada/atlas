@@ -16,6 +16,14 @@
 
 set -euo pipefail
 
+# The atlas-helper sidecar is macOS-only — it links AppKit and
+# ScreenCaptureKit. Skip cleanly on other platforms so cross-platform
+# CI builds (Linux, Windows) don't fail trying to compile Apple targets.
+if [ "$(uname -s)" != "Darwin" ]; then
+    echo "atlas-helper: macOS-only sidecar; skipping build on $(uname -s)."
+    exit 0
+fi
+
 cd "$(dirname "$0")"
 SRC="main.swift"
 OUT_DIR="$(cd ../../binaries 2>/dev/null && pwd || (mkdir -p ../../binaries && cd ../../binaries && pwd))"

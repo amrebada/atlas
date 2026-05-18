@@ -79,9 +79,13 @@ impl WakeLock {
     fn release(&mut self) {
         self.refs = self.refs.saturating_sub(1);
         if self.refs == 0 {
-            if let Some(mut c) = self.child.take() {
-                let _ = c.kill();
-                let _ = c.wait();
+            if let Some(mut child) = self.child.take() {
+                // Closing stdin lets a piped helper (Linux `cat`) exit on
+                // EOF — graceful, no orphaned process. `kill` is then a
+                // harmless no-op (caffeinate has no stdin and is killed).
+                drop(child.stdin.take());
+                let _ = child.kill();
+                let _ = child.wait();
             }
         }
     }
@@ -99,9 +103,28 @@ fn spawn_wake_lock() -> Option<std::process::Child> {
         .ok()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 fn spawn_wake_lock() -> Option<std::process::Child> {
-    // TODO(pilot): Linux/Windows wake lock via the `keepawake` crate.
+    // `systemd-inhibit` holds an idle inhibitor for as long as its child
+    // runs. `cat` blocks on the piped stdin; dropping that pipe on release
+    // gives it EOF so it exits cleanly — no SIGKILL, no orphaned process.
+    Command::new("systemd-inhibit")
+        .args([
+            "--what=idle",
+            "--mode=block",
+            "--why=Atlas Pilot is running a build",
+            "cat",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn spawn_wake_lock() -> Option<std::process::Child> {
+    // TODO(pilot): Windows wake lock via SetThreadExecutionState.
     None
 }
 
@@ -202,6 +225,35 @@ impl PilotManager {
         let sid = session_id.ok_or_else(|| anyhow::anyhow!("no session id recorded yet"))?;
         self.inner
             .spawn_run(project, mode, vec!["--resume".into(), sid])
+    }
+
+    /// On app startup, resume every pilot project that had an epic mid-run
+    /// when Atlas last closed (`claude --resume`). Best-effort — projects
+    /// with nothing resumable (no session id yet, etc.) are skipped.
+    pub fn resume_all(&self, app_data_dir: &Path) {
+        for project in pilot_io::load_registry(app_data_dir) {
+            let Ok(Some(proj)) = pilot_io::load_project(&project) else {
+                continue;
+            };
+            if proj.status != PilotStatus::Active {
+                continue;
+            }
+            let epics = pilot_io::load_epics(&project).unwrap_or_default();
+            let mid_run = epics.iter().any(|e| {
+                matches!(e.status, EpicStatus::Active | EpicStatus::Interrupted)
+            });
+            if !mid_run {
+                continue;
+            }
+            match self.resume(&project) {
+                Ok(()) => {
+                    tracing::info!(project = %project.display(), "pilot: auto-resumed on startup");
+                }
+                Err(e) => {
+                    tracing::info!(error = %e, project = %project.display(), "pilot: startup resume skipped");
+                }
+            }
+        }
     }
 
     /// Send a message (a question answer or a mid-epic modification) to the
