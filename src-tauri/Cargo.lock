@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "atlas"
-version = "1.0.21"
+version = "1.0.22"
 dependencies = [
  "anyhow",
  "arboard",

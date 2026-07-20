@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 
 use crate::editors::{self, EditorEntry};
 use crate::events;
-use crate::storage::Db;
+use crate::storage::{AppContext, Db};
 
 /// `editors.detect` - return every editor Atlas knows about, with
 #[tauri::command]
@@ -22,6 +22,7 @@ pub async fn editors_detect() -> Result<Vec<EditorEntry>, String> {
 pub async fn editors_open_project(
     app: AppHandle,
     state: State<'_, Db>,
+    ctx: State<'_, AppContext>,
     project_id: String,
     editor_id: Option<String>,
 ) -> Result<(), String> {
@@ -31,8 +32,17 @@ pub async fn editors_open_project(
         .map_err(|e: anyhow::Error| e.to_string())?
         .ok_or_else(|| format!("project not found: {project_id}"))?;
 
-    // Resolve the editor. TODO: when the settings store lands, read
-    let wanted_id = editor_id.unwrap_or_else(|| "vscode".to_string());
+    // Resolve the editor: explicit choice > settings default > vscode.
+    let wanted_id = match editor_id {
+        Some(id) => id,
+        None => match crate::storage::settings::load(&ctx.app_data_dir).await {
+            Ok(s) => s.editors.default_id.unwrap_or_else(|| "vscode".to_string()),
+            Err(e) => {
+                tracing::warn!(error = %e, "load settings for default editor failed; using vscode");
+                "vscode".to_string()
+            }
+        },
+    };
 
     let detected = editors::detect_installed();
     let chosen = detected
