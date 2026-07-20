@@ -238,6 +238,8 @@ pub fn run() {
             commands::notes::notes_delete,
             commands::notes::notes_pin,
             commands::notes::notes_search,
+            commands::clipboard::clipboard_write_text,
+            commands::clipboard::clipboard_write_html,
             commands::collections::collections_members,
             commands::collections::collections_set_members,
             commands::collections::collections_create,

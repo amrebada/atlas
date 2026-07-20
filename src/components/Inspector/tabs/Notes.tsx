@@ -15,6 +15,10 @@ import {
   upsertNote,
 } from "../../../ipc";
 import { newId } from "../../../features/inspector/ids";
+import {
+  copyNoteBody,
+  type NoteCopyFormat,
+} from "../../../features/notes/note-clipboard";
 import type { Note, Project } from "../../../types";
 
 // Atlas - Inspector / Notes tab.
@@ -27,6 +31,8 @@ export function Notes({ project }: NotesProps) {
   const queryClient = useQueryClient();
   const pushToast = useUiStore((s) => s.pushToast);
   const setOpenNote = useUiStore((s) => s.setOpenNote);
+  const noteCopyFormat = useUiStore((s) => s.noteCopyFormat);
+  const setNoteCopyFormat = useUiStore((s) => s.setNoteCopyFormat);
 
   const [query, setQuery] = useState("");
 
@@ -149,6 +155,21 @@ export function Notes({ project }: NotesProps) {
     onSuccess: () => invalidateLists(),
   });
 
+  const copyNote = async (note: Note) => {
+    try {
+      await copyNoteBody(note.body, noteCopyFormat);
+      pushToast(
+        "success",
+        noteCopyFormat === "markdown" ? "Copied as Markdown" : "Copied formatted",
+      );
+    } catch (err) {
+      pushToast(
+        "error",
+        `Copy failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
   // ---- render -----------------------------------------------------------
 
   return (
@@ -158,6 +179,10 @@ export function Notes({ project }: NotesProps) {
           {notes.length} {notes.length === 1 ? "NOTE" : "NOTES"}
         </span>
         <div className="flex-1" />
+        <CopyFormatToggle
+          value={noteCopyFormat}
+          onChange={setNoteCopyFormat}
+        />
         <button
           type="button"
           onClick={() => createMutation.mutate()}
@@ -241,6 +266,7 @@ export function Notes({ project }: NotesProps) {
             onOpen={() =>
               setOpenNote({ projectId: project.id, noteId: note.id })
             }
+            onCopy={() => void copyNote(note)}
             onTogglePin={() => pinMutation.mutate(note)}
             onDelete={() => {
               if (window.confirm("Delete this note?"))
@@ -258,11 +284,12 @@ export function Notes({ project }: NotesProps) {
 interface NoteCardProps {
   note: Note;
   onOpen: () => void;
+  onCopy: () => void;
   onTogglePin: () => void;
   onDelete: () => void;
 }
 
-function NoteCard({ note, onOpen, onTogglePin, onDelete }: NoteCardProps) {
+function NoteCard({ note, onOpen, onCopy, onTogglePin, onDelete }: NoteCardProps) {
   const preview = useMemo(() => stripHtml(note.body), [note.body]);
 
   return (
@@ -282,6 +309,15 @@ function NoteCard({ note, onOpen, onTogglePin, onDelete }: NoteCardProps) {
           {note.title || "Untitled note"}
         </span>
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-[2px]">
+          <CardIconBtn
+            title="Copy"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopy();
+            }}
+            icon="copy"
+            stroke="var(--text-dim)"
+          />
           <CardIconBtn
             title={note.pinned ? "Unpin" : "Pin"}
             onClick={(e) => {
@@ -345,6 +381,43 @@ function CardIconBtn({
     >
       <Icon name={icon} size={11} stroke={stroke} />
     </button>
+  );
+}
+
+// Two-position switch for the copy button's clipboard format: markdown
+// text vs rich text/html.
+function CopyFormatToggle({
+  value,
+  onChange,
+}: {
+  value: NoteCopyFormat;
+  onChange: (f: NoteCopyFormat) => void;
+}) {
+  const seg = (f: NoteCopyFormat, label: string, title: string) => (
+    <button
+      type="button"
+      title={title}
+      aria-pressed={value === f}
+      onClick={() => onChange(f)}
+      className="px-[6px] h-[18px] rounded-[2px] font-mono text-[9px] uppercase tracking-[0.4px]"
+      style={{
+        background: value === f ? "var(--row-active)" : "transparent",
+        color: value === f ? "var(--accent)" : "var(--text-dimmer)",
+        border: "none",
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div
+      className="inline-flex items-center gap-px p-[1px] rounded-[3px]"
+      style={{ background: "var(--surface-2)", border: "1px solid var(--line)" }}
+    >
+      {seg("markdown", "md", "Copy button copies Markdown")}
+      {seg("formatted", "rich", "Copy button copies formatted text")}
+    </div>
   );
 }
 

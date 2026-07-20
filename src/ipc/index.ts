@@ -479,6 +479,15 @@ export const listRecents = (limit?: number) =>
   invoke<Project[]>("recents_list", { limit: limit ?? null });
 
 
+// Native pasteboard writes - the webview clipboard API is invisible to
+// macOS clipboard managers, so note copies go through Rust.
+export const clipboardWriteText = (text: string) =>
+  invoke<void>("clipboard_write_text", { text });
+
+export const clipboardWriteHtml = (html: string, alt: string) =>
+  invoke<void>("clipboard_write_html", { html, alt });
+
+
 export const detectEditors = () => invoke<EditorEntry[]>("editors_detect");
 
 export const openInEditor = (projectId: string, editorId?: string) =>

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Collection as DomainCollection, WatchRoot } from "../types";
+import type { NoteCopyFormat } from "../features/notes/note-clipboard";
 
 // Atlas - root UI store.
 
@@ -81,6 +82,10 @@ export interface UiState {
   // -  currently-open note overlay. `null` means the workspace is
   openNote: { projectId: string; noteId: string } | null;
 
+  // What the notes copy button puts on the clipboard: markdown text or
+  // rich text/html.
+  noteCopyFormat: NoteCopyFormat;
+
   // -  overlay visibility slices. Each overlay is mounted once at
   paletteOpen: boolean;
   newProjectOpen: null | { tab: "new" | "clone" | "import" };
@@ -116,6 +121,7 @@ export interface UiState {
   updateDiscovery: (p: Omit<DiscoveryProgress, "startedAt">) => void;
   clearDiscovery: (root: string) => void;
   setOpenNote: (v: { projectId: string; noteId: string } | null) => void;
+  setNoteCopyFormat: (f: NoteCopyFormat) => void;
 
   /** Overlay setters. */
   setPaletteOpen: (open: boolean) => void;
@@ -172,6 +178,7 @@ export const useUiStore = create<UiState>((set) => ({
   toasts: [],
   discovery: {},
   openNote: null,
+  noteCopyFormat: "markdown",
 
   paletteOpen: false,
   newProjectOpen: null,
@@ -222,6 +229,7 @@ export const useUiStore = create<UiState>((set) => ({
     }),
 
   setOpenNote: (openNote) => set({ openNote }),
+  setNoteCopyFormat: (noteCopyFormat) => set({ noteCopyFormat }),
 
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   openNewProject: (tab = "new") => set({ newProjectOpen: { tab } }),

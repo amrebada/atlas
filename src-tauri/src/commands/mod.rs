@@ -1,5 +1,6 @@
 //! Command handlers exposed to the frontend via `tauri::invoke`.
 
+pub mod clipboard;
 pub mod collections;
 pub mod disk;
 pub mod editors;

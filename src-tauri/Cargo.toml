@@ -1,6 +1,6 @@
 [package]
 name = "atlas"
-version = "1.0.20"
+version = "1.0.21"
 description = "Desktop-native command hub for local git projects"
 authors = ["Amr Ebada"]
 license = "MIT"
@@ -41,6 +41,10 @@ tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-decorum = "1"
 tauri-plugin-autostart = "2"
+
+# Native clipboard writes (commands/clipboard.rs) - the webview's JS
+# clipboard API is invisible to macOS clipboard managers.
+arboard = "3"
 
 # Serde / JSON / YAML
 serde = { version = "1", features = ["derive"] }

@@ -38,6 +38,16 @@ const REGISTRY: &[EditorSpec] = &[
         mac_app: Some("Cursor"),
     },
     EditorSpec {
+        id: "antigravity",
+        name: "Antigravity IDE",
+        candidates: &[
+            "antigravity-ide",
+            "antigravity",
+            "/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide",
+        ],
+        mac_app: Some("Antigravity IDE"),
+    },
+    EditorSpec {
         id: "zed",
         name: "Zed",
         candidates: &["zed", "/Applications/Zed.app/Contents/MacOS/cli"],
@@ -237,7 +247,10 @@ mod tests {
     #[test]
     fn registry_ids_match_prd() {
         let ids: Vec<&str> = REGISTRY.iter().map(|s| s.id).collect();
-        assert_eq!(ids, vec!["vscode", "cursor", "zed", "xcode", "sublime"]);
+        assert_eq!(
+            ids,
+            vec!["vscode", "cursor", "antigravity", "zed", "xcode", "sublime"]
+        );
     }
 
     #[test]

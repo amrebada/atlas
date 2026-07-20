@@ -42,6 +42,7 @@ import {
   type SlashCommand,
 } from "./slash-commands";
 import { SlashMenu } from "./SlashMenu";
+import { copyNoteBody, type NoteCopyFormat } from "./note-clipboard";
 
 // Atlas - full-page Tiptap note editor overlay.
 
@@ -430,6 +431,25 @@ function NoteEditorInner({
     }
   }, [pinned, project.id, pushToast]);
 
+  const doCopy = useCallback(
+    async (format: NoteCopyFormat) => {
+      if (!editor) return;
+      try {
+        await copyNoteBody(editor.getHTML(), format);
+        pushToast(
+          "success",
+          format === "markdown" ? "Copied as Markdown" : "Copied formatted",
+        );
+      } catch (err) {
+        pushToast(
+          "error",
+          `Copy failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+    [editor, pushToast],
+  );
+
   // ⌘S save, Esc close (skip close when focus is inside the prose to let
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -511,6 +531,25 @@ function NoteEditorInner({
                   ? "editing"
                   : "new note"}
         </span>
+        <button
+          type="button"
+          title="Copy as Markdown"
+          onClick={() => void doCopy("markdown")}
+          className="h-[26px] px-[7px] inline-flex items-center justify-center rounded-[5px] font-mono text-[10px] font-semibold"
+          style={{
+            background: "transparent",
+            border: "1px solid var(--line)",
+            color: "var(--text-dim)",
+          }}
+        >
+          MD
+        </button>
+        <IconButton
+          title="Copy formatted"
+          onClick={() => void doCopy("formatted")}
+          icon="copy"
+          stroke="var(--text-dim)"
+        />
         <IconButton
           title={pinned ? "Unpin" : "Pin"}
           onClick={togglePin}
