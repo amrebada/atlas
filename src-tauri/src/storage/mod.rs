@@ -5,6 +5,7 @@
 pub mod db;
 pub mod discovery;
 pub mod json;
+pub mod launch_templates;
 pub mod migrate;
 pub mod pilot_io;
 pub mod planner_io;
@@ -29,6 +30,8 @@ pub use types::{
     // Atlas Pilot
     Epic, EpicStatus, EpicTask, HistoryEntry, HistoryKind, PilotGate, PilotProject, PilotStatus,
 };
+// Launch templates (Claude Code session prompts).
+pub use types::{LaunchTemplate, LaunchTemplateVar};
 
 /// Bundle of long-lived resources the settings + templates commands need.
 #[derive(Clone)]

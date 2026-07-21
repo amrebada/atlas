@@ -29,6 +29,7 @@ import {
   type ProviderInfo,
 } from "../../ipc";
 import { QRCodeSVG } from "qrcode.react";
+import { LaunchTemplatesSection } from "../launch-templates/LaunchTemplatesSection";
 import { useUiStore } from "../../state/store";
 import type { SettingsSection } from "../../state/store";
 import type {
@@ -60,6 +61,7 @@ const SECTIONS: Array<{
   { id: "git", icon: "git", label: "Git" },
   { id: "watchers", icon: "folder", label: "Folder watchers" },
   { id: "templates", icon: "plus", label: "Templates" },
+  { id: "launch-templates", icon: "sparkle", label: "Session Templates" },
   { id: "shortcuts", icon: "cmd", label: "Shortcuts" },
   { id: "advanced", icon: "term", label: "Advanced" },
   { id: "about", icon: "sparkle", label: "About" },
@@ -191,6 +193,7 @@ export function SettingsPanel() {
           {section === "git" && <GitSection settings={settings} />}
           {section === "watchers" && <WatchersSection />}
           {section === "templates" && <TemplatesSection />}
+          {section === "launch-templates" && <LaunchTemplatesSection />}
           {section === "shortcuts" && (
             <ShortcutsSection settings={settings} />
           )}
@@ -2037,8 +2040,11 @@ function ExternalLink({
 }
 
 // -----------------------------------------------------------------------------
+// Shared primitives - also consumed by the launch-templates slice
+// (src/features/launch-templates/), which renders inside this panel and
+// must match its look exactly.
 
-function SectionHdr({ children }: { children: React.ReactNode }) {
+export function SectionHdr({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
@@ -2053,7 +2059,7 @@ function SectionHdr({ children }: { children: React.ReactNode }) {
   );
 }
 
-function SettingsRow({
+export function SettingsRow({
   label,
   hint,
   children,
@@ -2205,7 +2211,7 @@ function DebouncedInput({
   );
 }
 
-const INPUT_STYLE: React.CSSProperties = {
+export const INPUT_STYLE: React.CSSProperties = {
   width: "100%",
   padding: "7px 10px",
   fontSize: 13,
@@ -2216,7 +2222,7 @@ const INPUT_STYLE: React.CSSProperties = {
   outline: "none",
   fontFamily: "var(--sans)",
 };
-const GHOST_BTN: React.CSSProperties = {
+export const GHOST_BTN: React.CSSProperties = {
   padding: "6px 12px",
   fontSize: 12,
   height: 28,
@@ -2233,7 +2239,7 @@ const GHOST_BTN: React.CSSProperties = {
   flexShrink: 0,
   whiteSpace: "nowrap",
 };
-const PRIMARY_BTN: React.CSSProperties = {
+export const PRIMARY_BTN: React.CSSProperties = {
   padding: "6px 14px",
   fontSize: 12,
   height: 28,
@@ -2253,7 +2259,7 @@ const CODE_STYLE: React.CSSProperties = {
   background: "var(--surface-2)",
   color: "var(--text-dim)",
 };
-const SELECT_STYLE: React.CSSProperties = {
+export const SELECT_STYLE: React.CSSProperties = {
   padding: "4px 8px",
   fontSize: 12,
   background: "var(--surface-2)",

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Icon, type IconName } from "../../Icon";
 import { TabEmpty, TabError, TabSkeleton } from "../TabStates";
 import {
+  listLaunchTemplates,
   listProviders,
   listSessions,
   providerNewInvocation,
@@ -12,7 +13,13 @@ import {
 } from "../../../ipc";
 import { useUiStore } from "../../../state/store";
 import { spawnSessionPane } from "../../../features/terminal/TerminalStrip";
-import type { Project, Session, SessionStatus } from "../../../types";
+import { LaunchTemplateWizard } from "../../../features/launch-templates/LaunchTemplateWizard";
+import type {
+  LaunchTemplate,
+  Project,
+  Session,
+  SessionStatus,
+} from "../../../types";
 
 // Inspector / Sessions tab. Lists CLI-agent sessions discovered across
 // every enabled provider (Claude, Codex, OpenCode, …). The provider that
@@ -28,6 +35,11 @@ type ProviderFilter = "all" | string;
 export function Sessions({ project }: SessionsProps) {
   const pushToast = useUiStore((s) => s.pushToast);
   const [filter, setFilter] = useState<ProviderFilter>("all");
+  // Launch template picked from the split-button menu; non-null mounts the
+  // variable-filling wizard.
+  const [wizardTemplate, setWizardTemplate] = useState<LaunchTemplate | null>(
+    null,
+  );
 
   const { data: providers = [] } = useQuery<ProviderInfo[]>({
     queryKey: ["providers"],
@@ -176,6 +188,7 @@ export function Sessions({ project }: SessionsProps) {
           providers={enabledProviders}
           defaultProvider={defaultProvider}
           onStart={startNewSession}
+          onPickTemplate={setWizardTemplate}
         />
       </div>
 
@@ -212,6 +225,14 @@ export function Sessions({ project }: SessionsProps) {
           />
         ))}
       </div>
+
+      {wizardTemplate && (
+        <LaunchTemplateWizard
+          template={wizardTemplate}
+          project={project}
+          onClose={() => setWizardTemplate(null)}
+        />
+      )}
     </div>
   );
 }
@@ -304,12 +325,21 @@ function NewSessionSplitButton({
   providers,
   defaultProvider,
   onStart,
+  onPickTemplate,
 }: {
   providers: ProviderInfo[];
   defaultProvider: ProviderInfo | null;
   onStart: (id: string) => void;
+  onPickTemplate: (template: LaunchTemplate) => void;
 }) {
+  const openSettings = useUiStore((s) => s.openSettings);
   const [open, setOpen] = useState(false);
+
+  const { data: templates = [] } = useQuery<LaunchTemplate[]>({
+    queryKey: ["launch-templates"],
+    queryFn: listLaunchTemplates,
+    retry: false,
+  });
   const wrapRef = useRef<HTMLDivElement>(null);
   const chevronRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -367,7 +397,9 @@ function NewSessionSplitButton({
   }, [open]);
 
   const disabled = providers.length === 0;
-  const showChevron = providers.length > 1;
+  // The menu always carries the template group (at minimum "Manage
+  // templates…"), so the chevron is shown even with a single provider.
+  const showChevron = true;
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
@@ -401,7 +433,6 @@ function NewSessionSplitButton({
           <button
             ref={chevronRef}
             type="button"
-            disabled={disabled}
             onClick={() => setOpen((v) => !v)}
             aria-label="Choose provider"
             aria-haspopup="menu"
@@ -485,6 +516,70 @@ function NewSessionSplitButton({
                 )}
               </div>
             ))}
+
+            {/* Launch templates - separator, then one row per template
+                (skipped entirely when none exist), then the manage entry. */}
+            <div
+              className="h-px my-[3px]"
+              style={{ background: "var(--line)" }}
+            />
+            {templates.length > 0 && (
+              <>
+                <div
+                  className="px-[8px] pt-[4px] pb-[2px] font-mono text-[9px] uppercase tracking-[0.8px]"
+                  style={{ color: "var(--text-dimmer)" }}
+                >
+                  From template
+                </div>
+                {templates.map((t) => (
+                  <div
+                    key={t.id}
+                    role="menuitem"
+                    tabIndex={0}
+                    title={t.hint || undefined}
+                    onClick={() => {
+                      onPickTemplate(t);
+                      setOpen(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onPickTemplate(t);
+                        setOpen(false);
+                      }
+                    }}
+                    className="flex items-center gap-[8px] px-[8px] py-[6px] rounded-[3px] cursor-pointer text-[12px] hover:bg-[var(--row-active)]"
+                    style={{ color: "var(--text)" }}
+                  >
+                    <span
+                      className="w-[8px] h-[8px] rounded-full shrink-0"
+                      style={{ background: t.color || "var(--accent)" }}
+                    />
+                    <span className="flex-1 truncate">{t.label}</span>
+                  </div>
+                ))}
+              </>
+            )}
+            <div
+              role="menuitem"
+              tabIndex={0}
+              onClick={() => {
+                openSettings("launch-templates");
+                setOpen(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openSettings("launch-templates");
+                  setOpen(false);
+                }
+              }}
+              className="flex items-center gap-[8px] px-[8px] py-[6px] rounded-[3px] cursor-pointer text-[12px] hover:bg-[var(--row-active)]"
+              style={{ color: "var(--text-dim)" }}
+            >
+              <Icon name="gear" size={11} stroke="var(--text-dim)" />
+              <span className="flex-1">Manage templates…</span>
+            </div>
           </div>,
           document.body,
         )}

@@ -294,6 +294,32 @@ export type HistoryKind = "task" | "mod" | "question" | "epic";
 
 export type Lang = "TypeScript" | "JavaScript" | "Rust" | "Go" | "Python" | "Swift" | "Kotlin" | "Ruby" | "Java" | "C" | "C++" | "Other";
 
+/**
+ * Template for starting a new Claude Code session with a pre-filled prompt.
+ */
+export type LaunchTemplate = { id: string, label: string, hint: string, 
+/**
+ * Hex color, same convention as scaffold `Template.color`.
+ */
+color: string, 
+/**
+ * Tiptap-serialized HTML (same format as `Note.body`).
+ */
+body: string, variables: Array<LaunchTemplateVar>, 
+/**
+ * ISO-8601 rfc3339.
+ */
+createdAt: string, updatedAt: string, };
+
+/**
+ * One declared `{{key}}` placeholder in a launch template body.
+ */
+export type LaunchTemplateVar = { key: string, label: string, default: string, hint: string, multiline: boolean, 
+/**
+ * Non-empty => render as a `<select>`.
+ */
+options: Array<string>, required: boolean, };
+
 export type McpSettings = { enabled: boolean, port: number, 
 /**
  * Bearer token clients must send in `Authorization: Bearer …`.

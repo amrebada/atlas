@@ -8,6 +8,7 @@ pub mod agent;
 pub mod files;
 pub mod git;
 pub mod ics;
+pub mod launch_templates;
 pub mod mcp;
 pub mod milestones;
 pub mod notes;

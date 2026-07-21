@@ -1206,3 +1206,56 @@ pub struct HistoryEntry {
     #[serde(default)]
     pub rationale: String,
 }
+
+// ---------- Launch templates (Claude Code session prompts) ----------
+
+/// One declared `{{key}}` placeholder in a launch template body.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct LaunchTemplateVar {
+    pub key: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub default: String,
+    #[serde(default)]
+    pub hint: String,
+    #[serde(default)]
+    pub multiline: bool,
+    /// Non-empty => render as a `<select>`.
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+/// Template for starting a new Claude Code session with a pre-filled prompt.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct LaunchTemplate {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub hint: String,
+    /// Hex color, same convention as scaffold `Template.color`.
+    #[serde(default)]
+    pub color: String,
+    /// Tiptap-serialized HTML (same format as `Note.body`).
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub variables: Vec<LaunchTemplateVar>,
+    /// ISO-8601 rfc3339.
+    pub created_at: String,
+    pub updated_at: String,
+}

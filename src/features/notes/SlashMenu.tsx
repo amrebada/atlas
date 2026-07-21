@@ -14,6 +14,10 @@ interface SlashMenuProps {
   activeIdx: number;
   onPick: (cmd: SlashCommand) => void;
   onHover: (idx: number) => void;
+  /** Stacking level for the popup (portaled to document.body). Hosts that
+   *  live inside a high-z overlay must pass a value above their overlay
+   *  layer or the menu paints underneath it. Defaults to the note tier. */
+  zIndex?: number;
 }
 
 export function SlashMenu({
@@ -24,6 +28,7 @@ export function SlashMenu({
   activeIdx,
   onPick,
   onHover,
+  zIndex = 200,
 }: SlashMenuProps) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -42,8 +47,9 @@ export function SlashMenu({
       ref={listRef}
       // `mousedown` on the menu would otherwise steal focus from the editor
       onMouseDown={(e) => e.preventDefault()}
-      className="fixed z-[200] rounded-[6px] overflow-y-auto"
+      className="fixed rounded-[6px] overflow-y-auto"
       style={{
+        zIndex,
         left: Math.max(8, x),
         top: y,
         minWidth: 260,

@@ -153,6 +153,7 @@ export type SettingsSection =
   | "git"
   | "watchers"
   | "templates"
+  | "launch-templates"
   | "shortcuts"
   | "advanced"
   | "providers"

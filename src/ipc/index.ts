@@ -13,6 +13,7 @@ import type {
   Session,
   Settings,
   Template,
+  LaunchTemplate,
   EditorEntry,
   Milestone,
   MilestoneStatus,
@@ -467,6 +468,20 @@ export const upsertTemplate = (template: Template) =>
 
 export const removeTemplate = (id: string) =>
   invoke<void>("templates_remove", { id });
+
+
+// Launch templates - user-defined prompts for new Claude Code sessions.
+// Stored in `<app_data_dir>/launch_templates.json`; ids are generated
+// client-side (crypto.randomUUID) and upserts carry the full object.
+
+export const listLaunchTemplates = () =>
+  invoke<LaunchTemplate[]>("launch_templates_list");
+
+export const upsertLaunchTemplate = (template: LaunchTemplate) =>
+  invoke<void>("launch_templates_upsert", { template });
+
+export const removeLaunchTemplate = (id: string) =>
+  invoke<void>("launch_templates_remove", { id });
 
 
 export const paletteQuery = (query: string, limit?: number) =>

@@ -196,6 +196,31 @@ export interface Template {
   builtin: boolean;
 }
 
+/** One `{{key}}` placeholder declared on a launch template. */
+export interface LaunchTemplateVar {
+  key: string;
+  label: string;
+  default: string;
+  hint: string;
+  multiline: boolean;
+  /** Non-empty => the wizard renders a `<select>` instead of a text input. */
+  options: string[];
+  required: boolean;
+}
+
+/** Template for starting a new Claude Code session with a pre-filled prompt. */
+export interface LaunchTemplate {
+  id: string;
+  label: string;
+  hint: string;
+  color: string;
+  /** Tiptap-serialized HTML (same format as Note.body). */
+  body: string;
+  variables: LaunchTemplateVar[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Pane {
   id: PaneId;
   kind: PaneKind;
