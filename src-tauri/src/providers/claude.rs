@@ -1,4 +1,6 @@
-//! Claude Code provider — reads `~/.claude/projects/<slug>/*.jsonl`.
+//! Claude Code provider — reads `~/.claude/projects/<slug>/*.jsonl` and
+//! discovers installed skills (`~/.claude/skills`, `<project>/.claude/skills`,
+//! plugin `skills/` dirs listed in `installed_plugins.json`).
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -6,8 +8,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
 use super::shared::{
     canonicalize_or_self, derive_status, format_duration, home_dir, parse_ts, paths_equal,
@@ -143,8 +146,14 @@ pub fn claude_dir_for_project(project_path: &Path) -> anyhow::Result<Option<Path
     Ok(None)
 }
 
+/// `~/.claude` — the root every Claude Code scan (projects, skills,
+/// plugins) hangs off. Home resolution matches the rest of this file.
+pub fn claude_home() -> Option<PathBuf> {
+    home_dir().map(|h| h.join(".claude"))
+}
+
 fn claude_projects_root() -> Option<PathBuf> {
-    home_dir().map(|h| h.join(".claude").join("projects"))
+    claude_home().map(|h| h.join("projects"))
 }
 
 fn path_to_slug(path: &Path) -> String {
@@ -388,6 +397,180 @@ fn extract_user_text(content: Option<&Value>) -> Option<String> {
     }
 }
 
+// ---------- Skills discovery ----------
+
+/// One installed Claude Code skill (user, project, or plugin scope).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct ClaudeSkill {
+    /// Invocation name: the skill's directory name, or `plugin:dir` for
+    /// plugin skills. (The frontmatter `name:` is display-only.)
+    pub name: String,
+    /// Frontmatter `description:`, `""` when absent.
+    pub description: String,
+    /// `"user"` | `"project"` | `"plugin"`.
+    pub scope: String,
+    /// `Some(plugin name)` for plugin skills.
+    pub plugin: Option<String>,
+    /// Absolute path of the skill directory.
+    pub path: String,
+}
+
+/// Discover every installed skill visible from `claude_home` (`~/.claude`)
+/// plus, when given, `<project>/.claude/skills`. Pure over its base paths so
+/// tests can point it at a temp layout. Missing or malformed files are
+/// normal — they are skipped silently, never an error.
+///
+/// Sorted: project scope first, then user, then plugin; alphabetical within
+/// each scope.
+pub fn discover_skills(claude_home: &Path, project_path: Option<&Path>) -> Vec<ClaudeSkill> {
+    let mut out: Vec<ClaudeSkill> = Vec::new();
+    if let Some(project) = project_path {
+        scan_skills_dir(
+            &project.join(".claude").join("skills"),
+            "project",
+            None,
+            &mut out,
+        );
+    }
+    scan_skills_dir(&claude_home.join("skills"), "user", None, &mut out);
+    discover_plugin_skills(claude_home, &mut out);
+    out.sort_by(|a, b| {
+        scope_rank(&a.scope)
+            .cmp(&scope_rank(&b.scope))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    out
+}
+
+fn scope_rank(scope: &str) -> u8 {
+    match scope {
+        "project" => 0,
+        "user" => 1,
+        _ => 2,
+    }
+}
+
+/// Collect every `<dir>/SKILL.md` under `skills_dir` into `out`. Tolerates a
+/// missing dir, stray files, and unreadable SKILL.md content.
+fn scan_skills_dir(
+    skills_dir: &Path,
+    scope: &str,
+    plugin: Option<&str>,
+    out: &mut Vec<ClaudeSkill>,
+) {
+    let Ok(entries) = std::fs::read_dir(skills_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let skill_md = path.join("SKILL.md");
+        if !skill_md.is_file() {
+            continue;
+        }
+        let content = std::fs::read_to_string(&skill_md).unwrap_or_default();
+        let (_display_name, description) = parse_skill_frontmatter(&content);
+        let name = match plugin {
+            Some(p) => format!("{p}:{dir_name}"),
+            None => dir_name.to_string(),
+        };
+        out.push(ClaudeSkill {
+            name,
+            description: description.unwrap_or_default(),
+            scope: scope.to_string(),
+            plugin: plugin.map(str::to_string),
+            path: path.to_string_lossy().into_owned(),
+        });
+    }
+}
+
+/// Plugin skills: `<claude_home>/plugins/installed_plugins.json` maps
+/// `"<plugin>@<marketplace>"` to install records; each
+/// `<installPath>/skills/<dir>/SKILL.md` is a skill invoked as
+/// `<plugin>:<dir>`. Anything missing or malformed yields nothing.
+fn discover_plugin_skills(claude_home: &Path, out: &mut Vec<ClaudeSkill>) {
+    let manifest = claude_home.join("plugins").join("installed_plugins.json");
+    let Ok(raw) = std::fs::read_to_string(&manifest) else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return;
+    };
+    let Some(plugins) = value.get("plugins").and_then(Value::as_object) else {
+        return;
+    };
+    for (key, installs) in plugins {
+        let plugin_name = key.split('@').next().unwrap_or(key.as_str());
+        if plugin_name.is_empty() {
+            continue;
+        }
+        let Some(installs) = installs.as_array() else {
+            continue;
+        };
+        for install in installs {
+            let Some(install_path) = install.get("installPath").and_then(Value::as_str) else {
+                continue;
+            };
+            scan_skills_dir(
+                &Path::new(install_path).join("skills"),
+                "plugin",
+                Some(plugin_name),
+                out,
+            );
+        }
+    }
+}
+
+/// Extract `(name, description)` from the first fenced `---` frontmatter
+/// block: line-based, single-line values, trimmed, surrounding quotes
+/// stripped. `(None, None)` when there is no frontmatter.
+pub fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
+    let mut lines = content.lines();
+    match lines.next() {
+        Some(first) if first.trim() == "---" => {}
+        _ => return (None, None),
+    }
+    let mut name: Option<String> = None;
+    let mut description: Option<String> = None;
+    for line in lines {
+        if line.trim() == "---" {
+            break;
+        }
+        if let Some(v) = line.strip_prefix("name:") {
+            if name.is_none() {
+                name = Some(strip_quotes(v.trim()).to_string());
+            }
+        } else if let Some(v) = line.strip_prefix("description:") {
+            if description.is_none() {
+                description = Some(strip_quotes(v.trim()).to_string());
+            }
+        }
+    }
+    (name, description)
+}
+
+fn strip_quotes(s: &str) -> &str {
+    let b = s.as_bytes();
+    if b.len() >= 2
+        && ((b[0] == b'"' && b[b.len() - 1] == b'"') || (b[0] == b'\'' && b[b.len() - 1] == b'\''))
+    {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
+}
+
 // ---------- Tests ----------
 
 #[cfg(test)]
@@ -487,5 +670,157 @@ mod tests {
             path_to_slug(Path::new("/tmp/one-day-build/cli")),
             "-tmp-one-day-build-cli"
         );
+    }
+
+    // ---------- Skills discovery ----------
+
+    fn write_skill(dir: &Path, frontmatter: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), frontmatter).unwrap();
+    }
+
+    #[test]
+    fn skill_frontmatter_parses_name_and_description() {
+        let (name, desc) = parse_skill_frontmatter(
+            "---\nname: my-skill\ndescription: Does useful things\n---\n\nBody text.\n",
+        );
+        assert_eq!(name.as_deref(), Some("my-skill"));
+        assert_eq!(desc.as_deref(), Some("Does useful things"));
+    }
+
+    #[test]
+    fn skill_frontmatter_strips_surrounding_quotes() {
+        let (name, desc) = parse_skill_frontmatter(
+            "---\nname: \"quoted-name\"\ndescription: 'single: quoted, value'\n---\n",
+        );
+        assert_eq!(name.as_deref(), Some("quoted-name"));
+        assert_eq!(desc.as_deref(), Some("single: quoted, value"));
+    }
+
+    #[test]
+    fn skill_frontmatter_tolerates_missing_description() {
+        let (name, desc) = parse_skill_frontmatter("---\nname: lonely\n---\nBody.\n");
+        assert_eq!(name.as_deref(), Some("lonely"));
+        assert_eq!(desc, None);
+    }
+
+    #[test]
+    fn skill_frontmatter_none_without_fences() {
+        let (name, desc) = parse_skill_frontmatter("# Just a heading\n\nname: not-frontmatter\n");
+        assert_eq!(name, None);
+        assert_eq!(desc, None);
+    }
+
+    #[test]
+    fn discovers_skills_across_scopes_sorted() {
+        let home = tempfile::tempdir().unwrap(); // stands in for ~/.claude
+        let project = tempfile::tempdir().unwrap();
+        let plugin_install = tempfile::tempdir().unwrap();
+
+        // User scope: two real skills + a dir without SKILL.md + a stray file.
+        write_skill(
+            &home.path().join("skills").join("zeta"),
+            "---\nname: Zeta Display\ndescription: User zeta\n---\n",
+        );
+        write_skill(
+            &home.path().join("skills").join("alpha"),
+            "no frontmatter\n",
+        );
+        std::fs::create_dir_all(home.path().join("skills").join("not-a-skill")).unwrap();
+        std::fs::write(home.path().join("skills").join("stray.md"), "x").unwrap();
+
+        // Project scope.
+        let proj_skill = project.path().join(".claude").join("skills").join("proj-a");
+        write_skill(&proj_skill, "---\ndescription: Project helper\n---\n");
+
+        // Plugin scope: manifest points at plugin_install; a cache dir with a
+        // SKILL.md must NOT be picked up (only installPath entries count).
+        write_skill(
+            &plugin_install.path().join("skills").join("tool"),
+            "---\nname: tool\ndescription: Plugin tool\n---\n",
+        );
+        write_skill(
+            &plugin_install.path().join("skills").join("helper"),
+            "---\ndescription: Plugin helper\n---\n",
+        );
+        write_skill(
+            &home
+                .path()
+                .join("plugins")
+                .join("cache")
+                .join("mkt")
+                .join("repo")
+                .join("skills")
+                .join("cached"),
+            "---\ndescription: must not appear\n---\n",
+        );
+        let manifest = serde_json::json!({
+            "version": 2,
+            "plugins": {
+                "myplug@marketplace": [
+                    { "installPath": plugin_install.path().to_string_lossy() }
+                ]
+            }
+        });
+        std::fs::write(
+            home.path().join("plugins").join("installed_plugins.json"),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let skills = discover_skills(home.path(), Some(project.path()));
+        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["proj-a", "alpha", "zeta", "myplug:helper", "myplug:tool"]
+        );
+        let scopes: Vec<&str> = skills.iter().map(|s| s.scope.as_str()).collect();
+        assert_eq!(scopes, vec!["project", "user", "user", "plugin", "plugin"]);
+        assert_eq!(skills[0].description, "Project helper");
+        assert_eq!(skills[0].plugin, None);
+        assert_eq!(skills[0].path, proj_skill.to_string_lossy());
+        assert_eq!(skills[1].description, ""); // no frontmatter => empty
+        assert_eq!(skills[2].description, "User zeta"); // dir name wins over frontmatter name
+        assert_eq!(skills[3].plugin.as_deref(), Some("myplug"));
+        assert!(!names.contains(&"myplug:cached"));
+    }
+
+    #[test]
+    fn discovery_without_project_path_has_no_project_scope() {
+        let home = tempfile::tempdir().unwrap();
+        write_skill(
+            &home.path().join("skills").join("one"),
+            "---\ndescription: only user\n---\n",
+        );
+
+        let skills = discover_skills(home.path(), None);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].scope, "user");
+
+        // A project path with no .claude/skills dir is tolerated silently.
+        let empty_project = tempfile::tempdir().unwrap();
+        let skills = discover_skills(home.path(), Some(empty_project.path()));
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].scope, "user");
+    }
+
+    #[test]
+    fn malformed_installed_plugins_json_yields_user_skills_only() {
+        let home = tempfile::tempdir().unwrap();
+        write_skill(
+            &home.path().join("skills").join("one"),
+            "---\ndescription: still here\n---\n",
+        );
+        std::fs::create_dir_all(home.path().join("plugins")).unwrap();
+        std::fs::write(
+            home.path().join("plugins").join("installed_plugins.json"),
+            "{ not json",
+        )
+        .unwrap();
+
+        let skills = discover_skills(home.path(), None);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "one");
+        assert_eq!(skills[0].scope, "user");
     }
 }

@@ -221,6 +221,20 @@ export interface LaunchTemplate {
   updatedAt: string;
 }
 
+/** One Claude Code skill discovered on disk (hand-mirror of rust.ts). */
+export interface ClaudeSkill {
+  /** Invocation name: dir name, or `plugin:dir` for plugin skills. */
+  name: string;
+  /** Frontmatter description, "" if absent. */
+  description: string;
+  /** "user" | "project" | "plugin". */
+  scope: string;
+  /** Plugin name for plugin-scoped skills, null otherwise. */
+  plugin: string | null;
+  /** Absolute skill directory path. */
+  path: string;
+}
+
 export interface Pane {
   id: PaneId;
   kind: PaneKind;

@@ -59,6 +59,32 @@ export type ChatMessage = {
 role: string, text: string, };
 
 /**
+ * One installed Claude Code skill (user, project, or plugin scope).
+ */
+export type ClaudeSkill = { 
+/**
+ * Invocation name: the skill's directory name, or `plugin:dir` for
+ * plugin skills. (The frontmatter `name:` is display-only.)
+ */
+name: string, 
+/**
+ * Frontmatter `description:`, `""` when absent.
+ */
+description: string, 
+/**
+ * `"user"` | `"project"` | `"plugin"`.
+ */
+scope: string, 
+/**
+ * `Some(plugin name)` for plugin skills.
+ */
+plugin: string | null, 
+/**
+ * Absolute path of the skill directory.
+ */
+path: string, };
+
+/**
  * Clone depth - `number | 'full'` in TS. Encoded here as a tagged enum
  */
 export type CloneDepth = number | FullLiteral;

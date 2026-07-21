@@ -232,6 +232,7 @@ pub fn run() {
             commands::sessions::sessions_resume_info,
             commands::providers::providers_list,
             commands::providers::providers_new_invocation,
+            commands::providers::claude_skills_list,
             commands::notes::notes_list,
             commands::notes::notes_get,
             commands::notes::notes_upsert,

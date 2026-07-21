@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Icon, type IconName } from "../../Icon";
 import { TabEmpty, TabError, TabSkeleton } from "../TabStates";
 import {
+  listClaudeSkills,
   listLaunchTemplates,
   listProviders,
   listSessions,
@@ -14,7 +15,9 @@ import {
 import { useUiStore } from "../../../state/store";
 import { spawnSessionPane } from "../../../features/terminal/TerminalStrip";
 import { LaunchTemplateWizard } from "../../../features/launch-templates/LaunchTemplateWizard";
+import { SkillRunModal } from "../../../features/claude-skills/SkillRunModal";
 import type {
+  ClaudeSkill,
   LaunchTemplate,
   Project,
   Session,
@@ -40,10 +43,19 @@ export function Sessions({ project }: SessionsProps) {
   const [wizardTemplate, setWizardTemplate] = useState<LaunchTemplate | null>(
     null,
   );
+  // Claude Code skill picked from the Skills flyout; non-null mounts the
+  // free-form-input run modal.
+  const [runSkill, setRunSkill] = useState<ClaudeSkill | null>(null);
 
   const { data: providers = [] } = useQuery<ProviderInfo[]>({
     queryKey: ["providers"],
     queryFn: listProviders,
+    retry: false,
+  });
+
+  const { data: skills = [] } = useQuery<ClaudeSkill[]>({
+    queryKey: ["claude-skills", project.id],
+    queryFn: () => listClaudeSkills(project.id),
     retry: false,
   });
 
@@ -187,8 +199,10 @@ export function Sessions({ project }: SessionsProps) {
         <NewSessionSplitButton
           providers={enabledProviders}
           defaultProvider={defaultProvider}
+          skills={skills}
           onStart={startNewSession}
           onPickTemplate={setWizardTemplate}
+          onPickSkill={setRunSkill}
         />
       </div>
 
@@ -231,6 +245,13 @@ export function Sessions({ project }: SessionsProps) {
           template={wizardTemplate}
           project={project}
           onClose={() => setWizardTemplate(null)}
+        />
+      )}
+      {runSkill && (
+        <SkillRunModal
+          skill={runSkill}
+          project={project}
+          onClose={() => setRunSkill(null)}
         />
       )}
     </div>
@@ -324,13 +345,17 @@ function PillButton({
 function NewSessionSplitButton({
   providers,
   defaultProvider,
+  skills,
   onStart,
   onPickTemplate,
+  onPickSkill,
 }: {
   providers: ProviderInfo[];
   defaultProvider: ProviderInfo | null;
+  skills: ClaudeSkill[];
   onStart: (id: string) => void;
   onPickTemplate: (template: LaunchTemplate) => void;
+  onPickSkill: (skill: ClaudeSkill) => void;
 }) {
   const openSettings = useUiStore((s) => s.openSettings);
   const [open, setOpen] = useState(false);
@@ -347,14 +372,85 @@ function NewSessionSplitButton({
     null,
   );
 
+  // Skills flyout on the Claude provider row. Opens on hover/click of the
+  // trailing affordance; stays open while the pointer is over the claude
+  // row, the affordance, or the flyout (a short close delay bridges the
+  // 4px gap between menu and flyout); closes with the main menu.
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const claudeRowRef = useRef<HTMLDivElement>(null);
+  const flyoutRef = useRef<HTMLDivElement>(null);
+  const skillsCloseTimer = useRef<number | null>(null);
+  const [flyoutPos, setFlyoutPos] = useState<{
+    top: number;
+    right: number;
+  } | null>(null);
+
+  const cancelSkillsClose = () => {
+    if (skillsCloseTimer.current != null) {
+      window.clearTimeout(skillsCloseTimer.current);
+      skillsCloseTimer.current = null;
+    }
+  };
+  const scheduleSkillsClose = () => {
+    cancelSkillsClose();
+    skillsCloseTimer.current = window.setTimeout(
+      () => setSkillsOpen(false),
+      150,
+    );
+  };
+  useEffect(() => cancelSkillsClose, []);
+
+  // The flyout never outlives the main menu.
+  useEffect(() => {
+    if (!open) setSkillsOpen(false);
+  }, [open]);
+
+  // Position the flyout to the LEFT of the main menu (the menu hugs the
+  // right window edge), top-aligned with the claude row.
+  useLayoutEffect(() => {
+    if (!skillsOpen) {
+      setFlyoutPos(null);
+      return;
+    }
+    const menuEl = menuRef.current;
+    const rowEl = claudeRowRef.current;
+    if (!menuEl || !rowEl) return;
+    const menuRect = menuEl.getBoundingClientRect();
+    const rowRect = rowEl.getBoundingClientRect();
+    setFlyoutPos({
+      top: Math.max(8, rowRect.top),
+      right: window.innerWidth - menuRect.left + 4,
+    });
+  }, [skillsOpen]);
+
+  // Re-clamp once the flyout has a real height so it never spills past
+  // the bottom of the viewport (it renders only after flyoutPos is set,
+  // so the first pass above can't measure it).
+  useLayoutEffect(() => {
+    if (!skillsOpen || !flyoutPos) return;
+    const el = flyoutRef.current;
+    if (!el) return;
+    const overflow = flyoutPos.top + el.offsetHeight - (window.innerHeight - 8);
+    if (overflow > 0) {
+      setFlyoutPos((p) => p && { ...p, top: Math.max(8, p.top - overflow) });
+    }
+  }, [skillsOpen, flyoutPos, skills]);
+
+  const pickSkill = (skill: ClaudeSkill) => {
+    onPickSkill(skill);
+    setSkillsOpen(false);
+    setOpen(false);
+  };
+
   // Close on outside click. The menu lives in a portal, so check both
-  // the trigger wrapper *and* the menu node.
+  // the trigger wrapper *and* the menu node (and the skills flyout).
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node;
       if (wrapRef.current?.contains(t)) return;
       if (menuRef.current?.contains(t)) return;
+      if (flyoutRef.current?.contains(t)) return;
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -474,6 +570,7 @@ function NewSessionSplitButton({
             {providers.map((p) => (
               <div
                 key={p.id}
+                ref={p.id === "claude" ? claudeRowRef : undefined}
                 role="menuitem"
                 tabIndex={0}
                 onClick={() => {
@@ -481,12 +578,21 @@ function NewSessionSplitButton({
                   setOpen(false);
                 }}
                 onKeyDown={(e) => {
+                  // Keydowns bubbling up from the nested skills affordance
+                  // must not also start a plain session.
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     onStart(p.id);
                     setOpen(false);
                   }
                 }}
+                onMouseEnter={
+                  p.id === "claude" ? cancelSkillsClose : undefined
+                }
+                onMouseLeave={
+                  p.id === "claude" ? scheduleSkillsClose : undefined
+                }
                 className="flex items-center gap-[8px] px-[8px] py-[6px] rounded-[3px] cursor-pointer text-[12px] hover:bg-[var(--row-active)]"
                 style={{
                   color: p.available ? "var(--text)" : "var(--text-dim)",
@@ -513,6 +619,35 @@ function NewSessionSplitButton({
                   >
                     default
                   </span>
+                )}
+                {p.id === "claude" && (
+                  <button
+                    type="button"
+                    title="Skills"
+                    aria-label="Claude Code skills"
+                    aria-haspopup="menu"
+                    aria-expanded={skillsOpen}
+                    onClick={(e) => {
+                      // The row's plain-session click must keep working;
+                      // this affordance only drives the flyout.
+                      e.stopPropagation();
+                      setSkillsOpen(true);
+                    }}
+                    onMouseEnter={() => {
+                      cancelSkillsClose();
+                      setSkillsOpen(true);
+                    }}
+                    className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-[3px] shrink-0 hover:bg-[var(--surface-2)]"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      color: "var(--text-dim)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Icon name="chevron" size={10} stroke="currentColor" />
+                  </button>
                 )}
               </div>
             ))}
@@ -580,6 +715,75 @@ function NewSessionSplitButton({
               <Icon name="gear" size={11} stroke="var(--text-dim)" />
               <span className="flex-1">Manage templates…</span>
             </div>
+          </div>,
+          document.body,
+        )}
+      {open && skillsOpen && flyoutPos &&
+        createPortal(
+          <div
+            ref={flyoutRef}
+            role="menu"
+            aria-label="Claude Code skills"
+            onClick={(e) => e.stopPropagation()}
+            onMouseEnter={cancelSkillsClose}
+            onMouseLeave={scheduleSkillsClose}
+            className="rounded-[5px] p-[4px]"
+            style={{
+              position: "fixed",
+              top: flyoutPos.top,
+              right: flyoutPos.right,
+              minWidth: 240,
+              maxHeight: "60vh",
+              overflowY: "auto",
+              background: "var(--surface)",
+              border: "1px solid var(--line)",
+              boxShadow: "0 12px 28px rgba(0,0,0,0.35)",
+              zIndex: 1000,
+            }}
+          >
+            <div
+              className="px-[8px] pt-[4px] pb-[2px] font-mono text-[9px] uppercase tracking-[0.8px]"
+              style={{ color: "var(--text-dimmer)" }}
+            >
+              Skills
+            </div>
+            {skills.length === 0 && (
+              <div
+                className="px-[8px] py-[6px] text-[12px]"
+                style={{ color: "var(--text-dim)" }}
+              >
+                No skills found
+              </div>
+            )}
+            {skills.map((s) => (
+              <div
+                key={s.path}
+                role="menuitem"
+                tabIndex={0}
+                title={s.description || undefined}
+                onClick={() => pickSkill(s)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    pickSkill(s);
+                  }
+                }}
+                className="flex items-center gap-[8px] px-[8px] py-[6px] rounded-[3px] cursor-pointer hover:bg-[var(--row-active)]"
+                style={{ color: "var(--text)" }}
+              >
+                <span className="flex-1 truncate font-mono text-[11px]">
+                  {s.name}
+                </span>
+                {(s.scope === "project" || s.scope === "plugin") && (
+                  <span
+                    className="font-mono text-[9px] uppercase shrink-0"
+                    style={{ color: "var(--text-dimmer)" }}
+                  >
+                    {s.scope === "project" ? "project" : (s.plugin ?? "plugin")}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>,
           document.body,
         )}

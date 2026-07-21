@@ -14,6 +14,7 @@ import type {
   Settings,
   Template,
   LaunchTemplate,
+  ClaudeSkill,
   EditorEntry,
   Milestone,
   MilestoneStatus,
@@ -482,6 +483,13 @@ export const upsertLaunchTemplate = (template: LaunchTemplate) =>
 
 export const removeLaunchTemplate = (id: string) =>
   invoke<void>("launch_templates_remove", { id });
+
+
+// Claude Code skills discovered on this machine (user + project + plugin
+// scopes). Pass null to skip the project scope.
+
+export const listClaudeSkills = (projectId: string | null) =>
+  invoke<ClaudeSkill[]>("claude_skills_list", { projectId });
 
 
 export const paletteQuery = (query: string, limit?: number) =>
