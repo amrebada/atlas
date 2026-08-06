@@ -659,6 +659,21 @@ export const gitStash = (projectId: string, message: string) =>
 export const gitPush = (projectId: string) =>
   invoke<GitActionResult>("git_push", { projectId });
 
+// Atlas-managed block of `.git/info/exclude` - per-repo ignores that git
+// never commits. Mirrors `LocalExcludes` in commands/git.rs.
+export interface LocalExcludes {
+  isGitRepo: boolean;
+  patterns: string[];
+  atlasIgnored: boolean;
+  atlasTracked: boolean;
+}
+
+export const localExcludesGet = (projectId: string) =>
+  invoke<LocalExcludes>("local_excludes_get", { projectId });
+
+export const localExcludesSet = (projectId: string, patterns: string[]) =>
+  invoke<LocalExcludes>("local_excludes_set", { projectId, patterns });
+
 export const projectsMoveToTrash = (id: string) =>
   invoke<void>("projects_move_to_trash", { id });
 

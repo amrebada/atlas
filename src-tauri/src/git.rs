@@ -209,6 +209,142 @@ pub fn file_statuses(project_path: &Path) -> anyhow::Result<Vec<FileStatus>> {
     Ok(out)
 }
 
+// ---- local excludes (`.git/info/exclude`) --------------------------------
+//
+// `.git/info/exclude` is git's per-repo ignore file: same syntax as
+// `.gitignore`, but it lives inside `.git/` so it is never committed or
+// pushed. Atlas owns one clearly-delimited block inside it and never touches
+// lines the user wrote outside that block.
+
+/// First line of the Atlas-managed span inside `.git/info/exclude`.
+pub const EXCLUDE_BLOCK_START: &str = "# --- managed by Atlas (do not edit inside this block) ---";
+/// Last line of the Atlas-managed span.
+pub const EXCLUDE_BLOCK_END: &str = "# --- end Atlas ---";
+
+/// Absolute path of the repo's `info/exclude` file.
+fn exclude_file_path(repo: &Repository) -> std::path::PathBuf {
+    repo.path().join("info").join("exclude")
+}
+
+/// Patterns inside the Atlas-managed block of `.git/info/exclude`. Empty
+/// when the file or the block doesn't exist, or `project_path` isn't a repo.
+pub fn read_local_excludes(project_path: &Path) -> anyhow::Result<Vec<String>> {
+    let repo = match Repository::open(project_path) {
+        Ok(r) => r,
+        Err(e) if is_not_a_repo(&e) => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let file = exclude_file_path(&repo);
+    let content = match std::fs::read_to_string(&file) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    Ok(parse_managed_block(&content))
+}
+
+/// Replace the Atlas-managed block with `patterns`, preserving every line
+/// the user wrote outside it. An empty `patterns` removes the block.
+pub fn write_local_excludes(project_path: &Path, patterns: &[String]) -> anyhow::Result<()> {
+    let repo = Repository::open(project_path)?;
+    let file = exclude_file_path(&repo);
+    let existing = match std::fs::read_to_string(&file) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let rewritten = splice_managed_block(&existing, patterns);
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&file, rewritten)?;
+    Ok(())
+}
+
+/// True when git ignores `.atlas/` from any rule source - the managed block,
+/// `.gitignore`, or the user's global excludes file.
+pub fn atlas_dir_ignored(project_path: &Path) -> anyhow::Result<bool> {
+    let repo = match Repository::open(project_path) {
+        Ok(r) => r,
+        Err(e) if is_not_a_repo(&e) => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+    // Trailing slash marks the path as a directory for dir-only rules.
+    Ok(repo.is_path_ignored(".atlas/")?)
+}
+
+/// True when any `.atlas/` file is in the index. Ignore rules only affect
+/// untracked files, so callers surface a "de-index first" warning.
+pub fn atlas_dir_tracked(project_path: &Path) -> anyhow::Result<bool> {
+    let repo = match Repository::open(project_path) {
+        Ok(r) => r,
+        Err(e) if is_not_a_repo(&e) => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+    let index = repo.index()?;
+    Ok(index.iter().any(|e| e.path.starts_with(b".atlas/")))
+}
+
+fn parse_managed_block(content: &str) -> Vec<String> {
+    let mut inside = false;
+    let mut out = Vec::new();
+    for line in content.lines() {
+        let t = line.trim();
+        if t == EXCLUDE_BLOCK_START {
+            inside = true;
+        } else if t == EXCLUDE_BLOCK_END {
+            inside = false;
+        } else if inside && !t.is_empty() && !t.starts_with('#') {
+            out.push(t.to_string());
+        }
+    }
+    out
+}
+
+fn splice_managed_block(existing: &str, patterns: &[String]) -> String {
+    let mut kept: Vec<&str> = Vec::new();
+    let mut inside = false;
+    for line in existing.lines() {
+        let t = line.trim();
+        if t == EXCLUDE_BLOCK_START {
+            inside = true;
+        } else if t == EXCLUDE_BLOCK_END {
+            inside = false;
+        } else if !inside {
+            kept.push(line);
+        }
+    }
+    while kept.last().is_some_and(|l| l.trim().is_empty()) {
+        kept.pop();
+    }
+
+    let cleaned: Vec<&str> = patterns
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+
+    let mut out = kept.join("\n");
+    if cleaned.is_empty() {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        return out;
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(EXCLUDE_BLOCK_START);
+    out.push('\n');
+    for p in &cleaned {
+        out.push_str(p);
+        out.push('\n');
+    }
+    out.push_str(EXCLUDE_BLOCK_END);
+    out.push('\n');
+    out
+}
+
 /// `(ahead, behind)` of the local branch vs its configured upstream.
 fn ahead_behind(repo: &Repository) -> anyhow::Result<(u32, u32)> {
     let head = repo.head()?;
@@ -366,6 +502,84 @@ mod tests {
 
         let s = read_status(&tmp.0)?.expect("repo present");
         assert_eq!((s.ahead, s.behind), (0, 0));
+        Ok(())
+    }
+
+    #[test]
+    fn local_excludes_round_trip_and_ignore_effect() -> anyhow::Result<()> {
+        let tmp = TmpDir::new("excludes-roundtrip")?;
+        let _repo = Repository::init(&tmp.0)?;
+
+        // Nothing written yet.
+        assert!(read_local_excludes(&tmp.0)?.is_empty());
+        assert!(!atlas_dir_ignored(&tmp.0)?);
+
+        let patterns = vec![".atlas/".to_string(), "*.excalidraw".to_string()];
+        write_local_excludes(&tmp.0, &patterns)?;
+        assert_eq!(read_local_excludes(&tmp.0)?, patterns);
+
+        // The written block must actually change git's ignore verdict, both
+        // for the `.atlas/` dir rule and for a glob rule.
+        fs::create_dir_all(tmp.0.join(".atlas"))?;
+        fs::write(tmp.0.join(".atlas").join("todos.json"), b"{}")?;
+        assert!(atlas_dir_ignored(&tmp.0)?);
+        let repo = Repository::open(&tmp.0)?;
+        assert!(repo.is_path_ignored("diagram.excalidraw")?);
+        assert!(!repo.is_path_ignored("kept.txt")?);
+
+        // Dirty count must not include the ignored `.atlas/` contents.
+        let s = read_status(&tmp.0)?.expect("repo present");
+        assert_eq!(s.dirty, 0, "ignored paths must not count as dirty");
+        Ok(())
+    }
+
+    #[test]
+    fn write_local_excludes_preserves_user_lines_outside_block() -> anyhow::Result<()> {
+        let tmp = TmpDir::new("excludes-preserve")?;
+        let repo = Repository::init(&tmp.0)?;
+
+        // The user already had hand-written rules in info/exclude.
+        let file = repo.path().join("info").join("exclude");
+        fs::create_dir_all(file.parent().unwrap())?;
+        fs::write(&file, "# mine\nsecret.env\n")?;
+
+        write_local_excludes(&tmp.0, &[".atlas/".to_string()])?;
+        let after = fs::read_to_string(&file)?;
+        assert!(after.contains("# mine"), "{after}");
+        assert!(after.contains("secret.env"), "{after}");
+        assert!(after.contains(EXCLUDE_BLOCK_START), "{after}");
+
+        // Rewriting with a different set replaces only the block...
+        write_local_excludes(&tmp.0, &["scratch-*.md".to_string()])?;
+        let after = fs::read_to_string(&file)?;
+        assert!(after.contains("secret.env"), "{after}");
+        assert!(after.contains("scratch-*.md"), "{after}");
+        assert!(!after.contains(".atlas/"), "{after}");
+
+        // ...and an empty set removes the block but keeps user lines.
+        write_local_excludes(&tmp.0, &[])?;
+        let after = fs::read_to_string(&file)?;
+        assert!(after.contains("secret.env"), "{after}");
+        assert!(!after.contains(EXCLUDE_BLOCK_START), "{after}");
+        Ok(())
+    }
+
+    #[test]
+    fn atlas_dir_tracked_detects_committed_atlas_files() -> anyhow::Result<()> {
+        let tmp = TmpDir::new("excludes-tracked")?;
+        let repo = Repository::init(&tmp.0)?;
+        repo.config()?.set_str("user.email", "test@example.com")?;
+        repo.config()?.set_str("user.name", "Atlas Test")?;
+
+        assert!(!atlas_dir_tracked(&tmp.0)?);
+
+        fs::create_dir_all(tmp.0.join(".atlas"))?;
+        fs::write(tmp.0.join(".atlas").join("todos.json"), b"{}")?;
+        let mut idx = repo.index()?;
+        idx.add_path(Path::new(".atlas/todos.json"))?;
+        idx.write()?;
+
+        assert!(atlas_dir_tracked(&tmp.0)?);
         Ok(())
     }
 }

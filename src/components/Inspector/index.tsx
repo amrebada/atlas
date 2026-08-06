@@ -14,6 +14,7 @@ import { Milestones } from "./tabs/Milestones";
 import { Routines } from "./tabs/Routines";
 import { Notes } from "./tabs/Notes";
 import { Disk } from "./tabs/Disk";
+import { Ignores } from "./tabs/Ignores";
 
 interface InspectorProps {
   project: Project | null;
@@ -130,6 +131,7 @@ export function Inspector({ project }: InspectorProps) {
         {activeTab === "routines" && <Routines project={project} />}
         {activeTab === "notes" && <Notes project={project} />}
         {activeTab === "disk" && <Disk project={project} />}
+        {activeTab === "ignores" && <Ignores project={project} />}
       </div>
     </aside>
   );

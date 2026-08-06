@@ -19,6 +19,7 @@ const TABS: TabSpec[] = [
   { id: "routines", icon: "repeat", label: "Routines" },
   { id: "notes", icon: "note", label: "Notes" },
   { id: "disk", icon: "hdd", label: "Disk" },
+  { id: "ignores", icon: "git", label: "Ignores" },
 ];
 
 export function TabStrip() {

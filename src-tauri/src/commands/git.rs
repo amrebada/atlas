@@ -139,6 +139,77 @@ pub async fn git_push(state: State<'_, Db>, project_id: String) -> Result<GitAct
     run_git(&cwd, &["push", "-u", "origin", &branch]).await
 }
 
+/// Snapshot of the Atlas-managed local-exclude state for a project. Backs
+/// the Inspector → Ignores tab.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct LocalExcludes {
+    /// False when the project directory is not a git repository.
+    pub is_git_repo: bool,
+    /// Patterns inside the Atlas-managed block of `.git/info/exclude`.
+    pub patterns: Vec<String>,
+    /// True when git ignores `.atlas/` from any rule source (managed block,
+    /// `.gitignore`, global excludes).
+    pub atlas_ignored: bool,
+    /// True when `.atlas/` files are committed to the index. Ignore rules
+    /// only affect untracked files, so the UI shows a de-index warning.
+    pub atlas_tracked: bool,
+}
+
+/// `git.local_excludes_get` - read the Atlas-managed block of
+/// `.git/info/exclude` plus the `.atlas/` ignored/tracked flags.
+#[tauri::command]
+pub async fn local_excludes_get(
+    state: State<'_, Db>,
+    project_id: String,
+) -> Result<LocalExcludes, String> {
+    let cwd = resolve_project_path(&state, &project_id).await?;
+    tauri::async_runtime::spawn_blocking(move || read_excludes_state(&cwd))
+        .await
+        .map_err(|e| format!("join blocking: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
+/// `git.local_excludes_set` - replace the Atlas-managed block with
+/// `patterns` (empty list removes the block) and return the fresh state.
+#[tauri::command]
+pub async fn local_excludes_set(
+    state: State<'_, Db>,
+    project_id: String,
+    patterns: Vec<String>,
+) -> Result<LocalExcludes, String> {
+    let cwd = resolve_project_path(&state, &project_id).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::git::write_local_excludes(&cwd, &patterns)?;
+        read_excludes_state(&cwd)
+    })
+    .await
+    .map_err(|e| format!("join blocking: {e}"))?
+    .map_err(|e| e.to_string())
+}
+
+fn read_excludes_state(project_path: &Path) -> anyhow::Result<LocalExcludes> {
+    if !crate::git::is_git_repo(project_path) {
+        return Ok(LocalExcludes {
+            is_git_repo: false,
+            patterns: Vec::new(),
+            atlas_ignored: false,
+            atlas_tracked: false,
+        });
+    }
+    Ok(LocalExcludes {
+        is_git_repo: true,
+        patterns: crate::git::read_local_excludes(project_path)?,
+        atlas_ignored: crate::git::atlas_dir_ignored(project_path)?,
+        atlas_tracked: crate::git::atlas_dir_tracked(project_path)?,
+    })
+}
+
 async fn resolve_project_path(state: &Db, project_id: &str) -> Result<PathBuf, String> {
     let project = state
         .get_project(project_id)

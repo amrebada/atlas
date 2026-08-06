@@ -346,6 +346,30 @@ export type LaunchTemplateVar = { key: string, label: string, default: string, h
  */
 options: Array<string>, required: boolean, };
 
+/**
+ * Snapshot of the Atlas-managed local-exclude state for a project. Backs
+ * the Inspector → Ignores tab.
+ */
+export type LocalExcludes = { 
+/**
+ * False when the project directory is not a git repository.
+ */
+isGitRepo: boolean, 
+/**
+ * Patterns inside the Atlas-managed block of `.git/info/exclude`.
+ */
+patterns: Array<string>, 
+/**
+ * True when git ignores `.atlas/` from any rule source (managed block,
+ * `.gitignore`, global excludes).
+ */
+atlasIgnored: boolean, 
+/**
+ * True when `.atlas/` files are committed to the index. Ignore rules
+ * only affect untracked files, so the UI shows a de-index warning.
+ */
+atlasTracked: boolean, };
+
 export type McpSettings = { enabled: boolean, port: number, 
 /**
  * Bearer token clients must send in `Authorization: Bearer …`.

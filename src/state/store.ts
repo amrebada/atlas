@@ -21,7 +21,8 @@ export type InspectorTab =
   | "milestones"
   | "routines"
   | "notes"
-  | "disk";
+  | "disk"
+  | "ignores";
 
 export type ToastKind = "info" | "success" | "warn" | "error";
 export interface Toast {

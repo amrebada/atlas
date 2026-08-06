@@ -208,6 +208,8 @@ pub fn run() {
             commands::git::git_commit,
             commands::git::git_stash,
             commands::git::git_push,
+            commands::git::local_excludes_get,
+            commands::git::local_excludes_set,
             commands::watchers::watchers_list,
             commands::watchers::watchers_add,
             commands::watchers::watchers_remove,
