@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to release (e.g. v1.0.26 — bare 1.0.26 works too)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,22 +20,55 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
 
     steps:
+      - name: Resolve release tag
+        id: resolve
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          PUSHED_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Accept "1.0.26" or "v1.0.26".
+            TAG="v${INPUT_TAG#v}"
+            if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::'$INPUT_TAG' is not a version tag (expected e.g. v1.0.26)"
+              exit 1
+            fi
+            # The tag must already be pushed: `gh release create` on an
+            # unknown tag silently creates it at the default-branch HEAD
+            # (which is how a stray `main` tag once appeared).
+            if ! gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              echo "::error::tag $TAG does not exist on ${{ github.repository }} — push it first"
+              exit 1
+            fi
+          else
+            TAG="$PUSHED_TAG"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "releasing $TAG"
+
       - name: Create or reuse release
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.resolve.outputs.tag }}
         run: |
           set -euo pipefail
-          if gh release view "${{ github.ref_name }}" \
+          if gh release view "$TAG" \
                --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "release ${{ github.ref_name }} already exists; reusing"
+            echo "release $TAG already exists; reusing"
             exit 0
           fi
-          gh release create "${{ github.ref_name }}" \
+          gh release create "$TAG" \
             --repo "${{ github.repository }}" \
-            --title "Atlas ${{ github.ref_name }}" \
+            --title "Atlas $TAG" \
             --notes "See CHANGELOG.md for release notes."
 
   build:
@@ -72,6 +110,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # On workflow_dispatch this is the input tag, so the build uses
+          # the tagged commit rather than the branch tip.
+          ref: ${{ needs.create-release.outputs.tag }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -170,6 +212,7 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.create-release.outputs.tag }}
         run: |
           set -euo pipefail
 
@@ -186,13 +229,13 @@ jobs:
           ASSETS+=("${{ steps.updater.outputs.bundle }}")
           ASSETS+=("${{ steps.updater.outputs.sig }}")
 
-          gh release upload "${{ github.ref_name }}" "${ASSETS[@]}" \
+          gh release upload "$TAG" "${ASSETS[@]}" \
             --clobber \
             --repo "${{ github.repository }}"
 
   manifest:
     name: Build & upload latest.json
-    needs: build
+    needs: [create-release, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -202,7 +245,7 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.create-release.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
