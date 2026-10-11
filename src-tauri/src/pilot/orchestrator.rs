@@ -191,8 +191,7 @@ impl PilotManager {
             "Use the atlas skill in planning mode. The repository is at {}. Begin.",
             project.display()
         );
-        self.inner
-            .spawn_run(project, RunMode::Planning, vec![seed])
+        self.inner.spawn_run(project, RunMode::Planning, vec![seed])
     }
 
     /// Start (or restart) implementation of a specific epic.
@@ -215,9 +214,10 @@ impl PilotManager {
             (RunMode::Planning, proj.planning_session_id.clone())
         } else {
             let epics = pilot_io::load_epics(project)?;
-            match epics.iter().find(|e| {
-                matches!(e.status, EpicStatus::Active | EpicStatus::Interrupted)
-            }) {
+            match epics
+                .iter()
+                .find(|e| matches!(e.status, EpicStatus::Active | EpicStatus::Interrupted))
+            {
                 Some(e) => (RunMode::Epic(e.number), e.session_id.clone()),
                 None => anyhow::bail!("nothing to resume"),
             }
@@ -239,9 +239,9 @@ impl PilotManager {
                 continue;
             }
             let epics = pilot_io::load_epics(&project).unwrap_or_default();
-            let mid_run = epics.iter().any(|e| {
-                matches!(e.status, EpicStatus::Active | EpicStatus::Interrupted)
-            });
+            let mid_run = epics
+                .iter()
+                .any(|e| matches!(e.status, EpicStatus::Active | EpicStatus::Interrupted));
             if !mid_run {
                 continue;
             }
@@ -363,21 +363,32 @@ impl Inner {
         mode: RunMode,
         args: Vec<String>,
     ) -> anyhow::Result<()> {
+        let mut req = OpenRequest {
+            kind: PaneKind::ClaudeSession,
+            cwd: project.to_path_buf(),
+            command: Some("claude".into()),
+            args,
+            env: Vec::new(),
+            title: Some(run_title(mode)),
+            branch: None,
+            script_id: None,
+            session_id: None,
+            cols: Some(120),
+            rows: Some(32),
+        };
+        // Same `--permission-mode` the terminal entry points apply.
+        if let Some(ctx) = self.app.try_state::<crate::storage::AppContext>() {
+            match crate::storage::settings::load_blocking(&ctx.app_data_dir) {
+                Ok(settings) => claude::inject_permission_mode(
+                    &mut req,
+                    settings.providers.claude_permission_mode,
+                ),
+                Err(e) => tracing::warn!(error = %e, "pilot: settings load failed"),
+            }
+        }
         let pane_id = {
             let tm = self.app.state::<TerminalManager>();
-            tm.open(OpenRequest {
-                kind: PaneKind::ClaudeSession,
-                cwd: project.to_path_buf(),
-                command: Some("claude".into()),
-                args,
-                env: Vec::new(),
-                title: Some(run_title(mode)),
-                branch: None,
-                script_id: None,
-                session_id: None,
-                cols: Some(120),
-                rows: Some(32),
-            })?
+            tm.open(req)?
         };
 
         let paused = Arc::new(AtomicBool::new(false));
@@ -449,8 +460,7 @@ impl Inner {
         let next = epics
             .iter()
             .find(|e| {
-                e.status == EpicStatus::Pending
-                    && e.depends_on.iter().all(|d| done.contains(d))
+                e.status == EpicStatus::Pending && e.depends_on.iter().all(|d| done.contains(d))
             })
             .map(|e| e.number);
 
@@ -695,7 +705,11 @@ async fn poll_loop(
     {
         let mut runs = inner.runs.lock().unwrap();
         let key = project_key(&project);
-        if runs.get(&key).map(|r| r.pane_id == pane_id).unwrap_or(false) {
+        if runs
+            .get(&key)
+            .map(|r| r.pane_id == pane_id)
+            .unwrap_or(false)
+        {
             runs.remove(&key);
         }
     }

@@ -78,6 +78,45 @@ impl SessionProvider for ClaudeProvider {
     }
 }
 
+// ---------- Launch helpers ----------
+
+/// Add `--permission-mode <mode>` to a `claude` launch request unless the
+/// caller already chose one (or opted into `--dangerously-skip-permissions`).
+/// Non-`claude` commands are left untouched, so this is safe to call on
+/// every `terminal.open`.
+pub fn inject_permission_mode(
+    req: &mut crate::terminal::OpenRequest,
+    mode: crate::storage::types::ClaudePermissionMode,
+) {
+    let Some(value) = mode.cli_value() else {
+        return;
+    };
+    let is_claude = req
+        .command
+        .as_deref()
+        .map(|c| {
+            std::path::Path::new(c)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(c)
+                == "claude"
+        })
+        .unwrap_or(false);
+    if !is_claude {
+        return;
+    }
+    let already = req.args.iter().any(|a| {
+        a == "--permission-mode"
+            || a.starts_with("--permission-mode=")
+            || a == "--dangerously-skip-permissions"
+    });
+    if already {
+        return;
+    }
+    req.args.push("--permission-mode".into());
+    req.args.push(value.into());
+}
+
 // ---------- JSONL row schema ----------
 
 #[derive(Debug, Deserialize)]
@@ -822,5 +861,65 @@ mod tests {
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "one");
         assert_eq!(skills[0].scope, "user");
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::inject_permission_mode;
+    use crate::storage::types::{ClaudePermissionMode, PaneKind};
+    use crate::terminal::OpenRequest;
+
+    fn req(command: Option<&str>, args: &[&str]) -> OpenRequest {
+        OpenRequest {
+            kind: PaneKind::ClaudeSession,
+            cwd: std::env::temp_dir(),
+            command: command.map(String::from),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            env: Vec::new(),
+            title: None,
+            branch: None,
+            script_id: None,
+            session_id: None,
+            cols: None,
+            rows: None,
+        }
+    }
+
+    #[test]
+    fn injects_mode_for_claude_only() {
+        let mut r = req(Some("claude"), &["--resume", "abc"]);
+        inject_permission_mode(&mut r, ClaudePermissionMode::AcceptEdits);
+        assert_eq!(
+            r.args,
+            vec!["--resume", "abc", "--permission-mode", "acceptEdits"]
+        );
+
+        let mut r = req(Some("/opt/bin/claude"), &[]);
+        inject_permission_mode(&mut r, ClaudePermissionMode::Plan);
+        assert_eq!(r.args, vec!["--permission-mode", "plan"]);
+
+        let mut r = req(Some("codex"), &[]);
+        inject_permission_mode(&mut r, ClaudePermissionMode::BypassPermissions);
+        assert!(r.args.is_empty());
+
+        let mut r = req(None, &[]);
+        inject_permission_mode(&mut r, ClaudePermissionMode::BypassPermissions);
+        assert!(r.args.is_empty());
+    }
+
+    #[test]
+    fn respects_explicit_choice_and_default() {
+        let mut r = req(Some("claude"), &["--permission-mode", "plan"]);
+        inject_permission_mode(&mut r, ClaudePermissionMode::AcceptEdits);
+        assert_eq!(r.args, vec!["--permission-mode", "plan"]);
+
+        let mut r = req(Some("claude"), &["--dangerously-skip-permissions"]);
+        inject_permission_mode(&mut r, ClaudePermissionMode::AcceptEdits);
+        assert_eq!(r.args, vec!["--dangerously-skip-permissions"]);
+
+        let mut r = req(Some("claude"), &[]);
+        inject_permission_mode(&mut r, ClaudePermissionMode::Default);
+        assert!(r.args.is_empty());
     }
 }

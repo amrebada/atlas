@@ -27,7 +27,11 @@ import {
   setSettings,
   upsertTemplate,
   type ProviderInfo,
+  claudeHooksInstall,
+  claudeHooksStatus,
+  claudeHooksUninstall,
 } from "../../ipc";
+import type { ClaudeHooksStatus } from "../../ipc";
 import { QRCodeSVG } from "qrcode.react";
 import { LaunchTemplatesSection } from "../launch-templates/LaunchTemplatesSection";
 import { useUiStore } from "../../state/store";
@@ -38,6 +42,7 @@ import type {
   Settings,
   Template,
   WatchRoot,
+  ClaudePermissionMode,
 } from "../../types";
 
 // Atlas - Settings panel.
@@ -581,6 +586,134 @@ function ProvidersSection({ settings }: { settings?: Settings }) {
           </div>
         );
       })}
+
+      <ClaudeCodeSection
+        mode={persisted?.claudePermissionMode ?? "default"}
+        onMode={(claudePermissionMode) => mutate.mutate({ claudePermissionMode })}
+      />
+    </div>
+  );
+}
+
+const PERMISSION_MODES: Array<{
+  value: ClaudePermissionMode;
+  label: string;
+  hint: string;
+}> = [
+  { value: "default", label: "default", hint: "Claude Code's own setting; prompts as usual" },
+  { value: "acceptEdits", label: "acceptEdits", hint: "auto-accept file edits, still ask for commands" },
+  { value: "plan", label: "plan", hint: "read-only planning mode" },
+  { value: "bypassPermissions", label: "bypassPermissions", hint: "never ask — use with care" },
+];
+
+/** Claude Code specifics: launch-time permission mode + the hook bridge
+ *  that lets Atlas raise notifications and answer permission prompts. */
+function ClaudeCodeSection({
+  mode,
+  onMode,
+}: {
+  mode: ClaudePermissionMode;
+  onMode: (m: ClaudePermissionMode) => void;
+}) {
+  const queryClient = useQueryClient();
+  const pushToast = useUiStore((s) => s.pushToast);
+
+  const { data: hooks, isLoading } = useQuery<ClaudeHooksStatus>({
+    queryKey: ["claude-hooks"],
+    queryFn: claudeHooksStatus,
+    retry: false,
+  });
+
+  const hooksMut = useMutation({
+    mutationFn: (on: boolean) => (on ? claudeHooksInstall() : claudeHooksUninstall()),
+    onSuccess: (st, on) => {
+      queryClient.setQueryData(["claude-hooks"], st);
+      pushToast(
+        "success",
+        on
+          ? "Atlas hooks installed — Claude Code will notify and ask here"
+          : "Atlas hooks removed from ~/.claude/settings.json",
+      );
+    },
+    onError: (err) => pushToast("error", `Hooks: ${String(err)}`, 6000),
+  });
+
+  const current = PERMISSION_MODES.find((m) => m.value === mode) ?? PERMISSION_MODES[0];
+  const partial = hooks && !hooks.installed && (hooks.notificationHook || hooks.permissionHook);
+
+  return (
+    <div style={{ marginTop: 22 }}>
+      <SectionHdr>Claude Code</SectionHdr>
+      <SettingsRow
+        label="Permission mode"
+        hint={`Passed as --permission-mode to every claude session Atlas starts (terminal, resume, launch templates, Pilot). ${current.hint}.`}
+      >
+        <select
+          value={mode}
+          onChange={(e) => onMode(e.target.value as ClaudePermissionMode)}
+          style={SELECT_STYLE}
+        >
+          {PERMISSION_MODES.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </SettingsRow>
+      {mode === "bypassPermissions" && (
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--warn, #d97757)",
+            marginTop: -6,
+            marginBottom: 10,
+          }}
+        >
+          bypassPermissions lets Claude Code run any command without asking. Atlas
+          approvals below won't be consulted.
+        </div>
+      )}
+
+      <SettingsRow
+        label="Notify &amp; approve from Atlas"
+        hint="Installs a Claude Code hook (Notification + PermissionRequest). Atlas raises a macOS banner when Claude needs you and shows an Allow / Deny dialog for permission prompts — for sessions started anywhere, not just Atlas panes. Other hooks in your settings are left untouched."
+      >
+        <Toggle
+          on={hooks?.installed ?? false}
+          onChange={(v) => hooksMut.mutate(v)}
+        />
+      </SettingsRow>
+      <div
+        style={{
+          fontSize: 11,
+          fontFamily: "var(--mono)",
+          color: "var(--text-dimmer)",
+          marginTop: -4,
+          lineHeight: 1.6,
+        }}
+      >
+        {isLoading && "checking ~/.claude/settings.json…"}
+        {hooks && (
+          <>
+            <div>
+              {hooks.installed
+                ? "installed"
+                : partial
+                  ? "partially installed — toggle on to repair"
+                  : "not installed"}
+              {" · "}
+              <span title={hooks.settingsPath}>
+                {hooks.settingsPath.replace(/^\/Users\/[^/]+\//, "~/")}
+              </span>
+            </div>
+            {hooks.installed && (
+              <div title={hooks.scriptPath}>
+                script: {hooks.scriptPath.replace(/^\/Users\/[^/]+\//, "~/")}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

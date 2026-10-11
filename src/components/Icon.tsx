@@ -44,6 +44,8 @@ export type IconName =
   | "hdd"
   | "flag"
   | "repeat"
+  | "home"
+  | "sync"
   | "code-sparkle";
 
 interface IconProps {
@@ -348,6 +350,23 @@ export function Icon({
         <svg {...p}>
           <path d="M3.5 2v12" />
           <path d="M3.5 3h8.5l-2 2.75 2 2.75H3.5" />
+        </svg>
+      );
+    case "home":
+      return (
+        <svg {...p}>
+          <path d="M2.5 7.5L8 2.5l5.5 5" />
+          <path d="M4 6.8V13a.5.5 0 00.5.5h2.5v-4h2v4h2.5a.5.5 0 00.5-.5V6.8" />
+        </svg>
+      );
+    case "sync":
+      // Pull-rebase-push: two arrows chasing each other.
+      return (
+        <svg {...p}>
+          <path d="M13 8a5 5 0 01-8.7 3.4" />
+          <path d="M3 8a5 5 0 018.7-3.4" />
+          <path d="M11.5 1.5v3.2h-3.2" />
+          <path d="M4.5 14.5v-3.2h3.2" />
         </svg>
       );
     case "repeat":

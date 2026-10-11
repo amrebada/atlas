@@ -25,6 +25,7 @@ export function useGlobalShortcuts(): void {
   const setTodayOpen = useUiStore((s) => s.setTodayOpen);
   const timelineOpen = useUiStore((s) => s.timelineOpen);
   const setTimelineOpen = useUiStore((s) => s.setTimelineOpen);
+  const setCollection = useUiStore((s) => s.setCollection);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -107,6 +108,12 @@ export function useGlobalShortcuts(): void {
         openNewProject(e.shiftKey ? "clone" : "new");
         return;
       }
+      // ⇧⌘H - jump to the Home dashboard. (Plain ⌘H is macOS "hide app".)
+      if (key === "h" && e.shiftKey) {
+        e.preventDefault();
+        setCollection("home");
+        return;
+      }
       if (key === ",") {
         e.preventDefault();
         openSettings("general");
@@ -148,5 +155,6 @@ export function useGlobalShortcuts(): void {
     setTodayOpen,
     timelineOpen,
     setTimelineOpen,
+    setCollection,
   ]);
 }

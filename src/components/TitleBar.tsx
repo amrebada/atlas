@@ -18,6 +18,8 @@ export function TitleBar({
   onSettings,
 }: TitleBarProps) {
   const setTimelineOpen = useUiStore((s) => s.setTimelineOpen);
+  const collection = useUiStore((s) => s.collection);
+  const crumb = project?.name ?? (collection === "home" ? "Home" : "All Projects");
   return (
     <div
       data-tauri-drag-region
@@ -32,7 +34,7 @@ export function TitleBar({
         <Icon name="folder" size={12} />
         <span>Atlas</span>
         <Icon name="chevron" size={10} />
-        <span className="text-text">{project?.name ?? "All Projects"}</span>
+        <span className="text-text">{crumb}</span>
       </div>
 
       <div data-tauri-drag-region className="flex-1" />

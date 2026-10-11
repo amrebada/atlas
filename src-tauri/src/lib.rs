@@ -7,6 +7,7 @@ use tauri::Manager;
 use tracing_subscriber::EnvFilter;
 
 mod agent;
+mod claude_hooks;
 mod commands;
 mod crash;
 mod editors;
@@ -28,10 +29,10 @@ mod tray;
 mod util;
 mod watcher;
 
+use pilot::PilotManager;
 use providers::ProvidersRegistry;
 use sessions::SessionsManager;
 use std::sync::Arc;
-use pilot::PilotManager;
 use storage::sync::SyncWorker;
 use storage::{AppContext, Db};
 use terminal::TerminalManager;
@@ -116,6 +117,15 @@ pub fn run() {
 
             app.manage(db.clone());
             app.manage(watcher);
+            // Claude Code hook bridge - drains `<app_data>/claude-hooks/inbox`
+            // and raises notifications / permission dialogs. Always running;
+            // it only does anything once the hooks are installed from
+            // Settings → Providers.
+            app.manage(claude_hooks::ClaudeHooksBridge::start(
+                app.handle().clone(),
+                &app_data,
+                db.clone(),
+            ));
             let registry = Arc::new(ProvidersRegistry::with_defaults());
             app.manage(Arc::clone(&registry));
             let sessions_mgr = Arc::new(SessionsManager::new(registry));
@@ -199,6 +209,7 @@ pub fn run() {
             commands::projects::projects_archive,
             commands::projects::projects_rename,
             commands::projects::projects_set_tags,
+            commands::projects::projects_set_path,
             commands::projects::projects_reorder_pinned,
             commands::projects::projects_move_to_trash,
             commands::projects::projects_repair,
@@ -208,6 +219,7 @@ pub fn run() {
             commands::git::git_commit,
             commands::git::git_stash,
             commands::git::git_push,
+            commands::git::git_sync,
             commands::git::local_excludes_get,
             commands::git::local_excludes_set,
             commands::watchers::watchers_list,
@@ -267,6 +279,11 @@ pub fn run() {
             commands::palette::palette_query,
             commands::recents::recents_push,
             commands::recents::recents_list,
+            commands::home::home_dashboard,
+            commands::claude_hooks::claude_hooks_status,
+            commands::claude_hooks::claude_hooks_install,
+            commands::claude_hooks::claude_hooks_uninstall,
+            commands::claude_hooks::claude_permission_resolve,
             commands::terminal::terminal_open,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,

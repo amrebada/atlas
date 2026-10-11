@@ -781,11 +781,10 @@ impl Db {
         // Re-sync the FTS row using whatever name is actually stored
         // (which may differ from `repo.name` if the user renamed the
         // project earlier).
-        let row: (i64, String) =
-            sqlx::query_as("SELECT rowid, name FROM projects WHERE id = ?")
-                .bind(&id)
-                .fetch_one(&self.pool)
-                .await?;
+        let row: (i64, String) = sqlx::query_as("SELECT rowid, name FROM projects WHERE id = ?")
+            .bind(&id)
+            .fetch_one(&self.pool)
+            .await?;
         fts_replace_project(&self.pool, row.0, &row.1, &path_str, "").await?;
 
         Ok(id)
@@ -925,6 +924,128 @@ impl Db {
         // Keep FTS in sync so the palette finds the new name.
         self.resync_project_fts(id).await?;
         Ok(())
+    }
+
+    /// Re-point a project at a different on-disk folder. Project ids are
+    /// a hash of the canonical path, so the row is re-keyed: a copy is
+    /// inserted under the new id, every FK-owning row (`tags`,
+    /// `collection_members`, `recents`) is moved across, and the old row
+    /// is dropped. Returns the hydrated project under its **new** id.
+    ///
+    /// Discovery-derived columns (`language`, `color`) are refreshed from
+    /// the new folder; user-owned columns (name, pin, archive, tags,
+    /// collections) are preserved.
+    pub async fn set_project_path(&self, old_id: &str, new_path: &Path) -> anyhow::Result<Project> {
+        if !new_path.is_dir() {
+            anyhow::bail!("not a directory: {}", new_path.display());
+        }
+        let canonical = new_path
+            .canonicalize()
+            .unwrap_or_else(|_| new_path.to_path_buf());
+        let new_id = project_id_for_path(&canonical);
+        let new_path_str = canonical.to_string_lossy().to_string();
+
+        let old = self
+            .get_project(old_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("project not found: {old_id}"))?;
+
+        if new_id == old_id && old.path == new_path_str {
+            return Ok(old);
+        }
+
+        // Refuse to collide with another indexed project.
+        let clash: Option<(String, String)> =
+            sqlx::query_as("SELECT id, name FROM projects WHERE (id = ? OR path = ?) AND id != ?")
+                .bind(&new_id)
+                .bind(&new_path_str)
+                .bind(old_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        if let Some((_, name)) = clash {
+            anyhow::bail!("that folder is already indexed as \"{name}\"");
+        }
+
+        let repo = scan_root_classify(&canonical);
+        let lang_str = lang_to_str(&repo.language);
+        let color = color_for_lang(&repo.language);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let mut tx = self.pool.begin().await?;
+
+        // Drop the stale FTS row for the old rowid before the row goes away.
+        let old_fts: Option<(i64, String, String, String)> = sqlx::query_as(
+            "SELECT p.rowid, f.name, f.path, f.tags FROM projects p \
+             JOIN projects_fts f ON f.rowid = p.rowid WHERE p.id = ?",
+        )
+        .bind(old_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .unwrap_or(None);
+        if let Some((rowid, n, p, t)) = old_fts {
+            sqlx::query(
+                "INSERT INTO projects_fts (projects_fts, rowid, name, path, tags) \
+                 VALUES ('delete', ?, ?, ?, ?)",
+            )
+            .bind(rowid)
+            .bind(n)
+            .bind(p)
+            .bind(t)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query(
+            "INSERT INTO projects (id, name, path, language, color, branch, \
+                                   dirty, ahead, behind, loc, size_bytes, disk_bytes, last_opened, \
+                                   pinned, archived, todos_count, notes_count, time_tracked, \
+                                   updated_at, discovered_at, source, pin_ord, author) \
+             SELECT ?, name, ?, ?, ?, '', 0, 0, 0, loc, size_bytes, disk_bytes, last_opened, \
+                    pinned, archived, todos_count, notes_count, time_tracked, \
+                    ?, discovered_at, 'manual', pin_ord, NULL \
+               FROM projects WHERE id = ?",
+        )
+        .bind(&new_id)
+        .bind(&new_path_str)
+        .bind(lang_str)
+        .bind(color)
+        .bind(&now)
+        .bind(old_id)
+        .execute(&mut *tx)
+        .await?;
+
+        for table in ["tags", "collection_members", "recents"] {
+            sqlx::query(&format!(
+                "UPDATE {table} SET project_id = ? WHERE project_id = ?"
+            ))
+            .bind(&new_id)
+            .bind(old_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        // Notes/todos FTS rows carry the project id as an unindexed column.
+        for table in ["notes_fts", "todos_fts"] {
+            sqlx::query(&format!(
+                "UPDATE {table} SET project_id = ? WHERE project_id = ?"
+            ))
+            .bind(&new_id)
+            .bind(old_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query("DELETE FROM projects WHERE id = ?")
+            .bind(old_id)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        self.resync_project_fts(&new_id).await?;
+
+        self.get_project(&new_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("re-keyed project vanished: {new_id}"))
     }
 
     /// Replace the tag set for a project with the given list. Duplicate
@@ -2040,6 +2161,11 @@ fn escape_like(s: &str) -> String {
     out
 }
 
+/// Classify a single repo folder (name + language) without walking it.
+fn scan_root_classify(path: &Path) -> DiscoveredRepo {
+    crate::storage::discovery::classify(path)
+}
+
 /// Deterministic 12-char lowercase hex slug for a path.
 pub fn project_id_for_path(path: &Path) -> String {
     // Try canonicalize; fall back to the raw path so missing paths still
@@ -2428,6 +2554,57 @@ mod tests {
         assert!(hits.iter().any(|p| p.id == id));
 
         let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn set_project_path_rekeys_and_moves_children() -> anyhow::Result<()> {
+        let db = Db::open_in_memory().await?;
+        let root = mkrepo_tree(
+            "set-path",
+            &[("alpha", &["Cargo.toml"]), ("beta", &["package.json"])],
+        );
+        let ids = db.discover_root(&root, 3).await?;
+        assert_eq!(ids.len(), 2);
+
+        let alpha = db
+            .list_projects(ProjectFilter::default())
+            .await?
+            .into_iter()
+            .find(|p| p.name == "alpha")
+            .expect("alpha indexed");
+        db.rename_project(&alpha.id, "My Alpha").await?;
+        db.pin_project(&alpha.id, true).await?;
+        db.set_tags(&alpha.id, &["rust".into()]).await?;
+        db.recents_push(&alpha.id).await?;
+
+        // Move alpha to a brand-new folder.
+        let moved = root.join("alpha-moved");
+        std::fs::create_dir_all(moved.join(".git"))?;
+        std::fs::write(moved.join("go.mod"), b"")?;
+
+        let next = db.set_project_path(&alpha.id, &moved).await?;
+        assert_ne!(next.id, alpha.id, "id must follow the path");
+        assert_eq!(next.name, "My Alpha", "user rename preserved");
+        assert!(next.pinned);
+        assert_eq!(next.tags, vec!["rust".to_string()]);
+        assert_eq!(next.language, Lang::Go, "language re-detected");
+        assert!(next.path.ends_with("alpha-moved"));
+
+        // Old id is gone; recents point at the new id.
+        assert!(db.get_project(&alpha.id).await?.is_none());
+        let recents = db.recents_list(5).await?;
+        assert_eq!(recents.len(), 1);
+        assert_eq!(recents[0].id, next.id);
+
+        // Collision with another indexed project is refused.
+        let beta_path = root.join("beta");
+        let err = db.set_project_path(&next.id, &beta_path).await.unwrap_err();
+        assert!(err.to_string().contains("already indexed"), "{err}");
+
+        // Re-pointing at the same folder is a no-op.
+        let same = db.set_project_path(&next.id, &moved).await?;
+        assert_eq!(same.id, next.id);
         Ok(())
     }
 

@@ -380,11 +380,22 @@ export interface PairEnvelope {
   deviceId: string;
 }
 
+/** Claude Code `--permission-mode` values (CLI spelling). */
+export type ClaudePermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "plan"
+  | "bypassPermissions";
+
 export interface ProvidersSettings {
   /** Per-provider enable flag. Missing entries default to `true`. */
   enabled: Record<string, boolean>;
   /** Provider id used by the "+ new session" main click. */
   defaultId: string;
+  /** Passed to every `claude` session Atlas launches. `"default"` passes
+   *  nothing so Claude Code's own setting applies. Optional for settings
+   *  files written before the field existed. */
+  claudePermissionMode?: ClaudePermissionMode;
 }
 
 export interface Settings {

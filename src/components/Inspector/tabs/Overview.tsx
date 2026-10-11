@@ -4,6 +4,8 @@ import { Section, StatLine } from "./_shared";
 import { useUiStore } from "../../../state/store";
 import { listTags, setProjectTags } from "../../../ipc";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useGitSync } from "../../../features/git-sync/useGitSync";
+import { useChangeProjectFolder } from "../../../features/project-folder/useChangeProjectFolder";
 import type { Project } from "../../../types";
 
 // Atlas - Inspector / Overview tab.
@@ -14,12 +16,37 @@ interface OverviewProps {
 
 export function Overview({ project }: OverviewProps) {
   const setActiveInspectorTab = useUiStore((s) => s.setActiveInspectorTab);
+  const syncMut = useGitSync();
+  const syncing = syncMut.isPending && syncMut.variables === project.id;
+  const hasRemoteWork = project.ahead > 0 || project.behind > 0;
 
   return (
     <div className="p-[14px] overflow-y-auto h-full">
       <MiniHeader project={project} />
 
-      <Section title="Git">
+      <Section
+        title="Git"
+        trailing={
+          <button
+            type="button"
+            onClick={() => syncMut.mutate(project.id)}
+            disabled={syncing}
+            title={
+              project.dirty > 0
+                ? "Stash local changes, pull --rebase, push, then re-apply the stash"
+                : "pull --rebase, then push"
+            }
+            className="inline-flex items-center gap-1 px-[7px] h-[20px] rounded-[4px] border border-line font-mono text-[10px] disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{
+              background: hasRemoteWork ? "var(--accent)" : "var(--surface-2)",
+              color: hasRemoteWork ? "var(--accent-fg)" : "var(--text-dim)",
+            }}
+          >
+            <Icon name="sync" size={10} />
+            {syncing ? "syncing…" : "sync"}
+          </button>
+        }
+      >
         <div className="flex items-center gap-2 py-[6px] border-b border-line-soft text-[12px]">
           <Icon name="branch" size={11} stroke="var(--text-dim)" />
           <span className="text-text font-mono">{project.branch || "—"}</span>
@@ -74,18 +101,31 @@ export function Overview({ project }: OverviewProps) {
 }
 
 function MiniHeader({ project }: { project: Project }) {
+  const { changeFolder, pendingId } = useChangeProjectFolder();
+  const busy = pendingId === project.id;
   // Strip the user home prefix for visual density - same trick as ProjectList.
   const shortPath = project.path.replace(/^\/Users\/[^/]+\//, "~/");
   return (
-    <div className="flex items-center gap-2 mb-[14px] text-[11px]">
+    <div className="flex items-center gap-2 mb-[14px] text-[11px] min-w-0">
       <LangDot color={project.color} size={8} />
       <span className="text-text font-medium">{project.name}</span>
       <span
-        className="text-text-dim font-mono truncate"
+        className="text-text-dim font-mono truncate min-w-0"
         title={project.path}
       >
         {shortPath}
       </span>
+      <button
+        type="button"
+        onClick={() => void changeFolder(project)}
+        disabled={busy}
+        title="Point this project at a different folder (notes, todos and tags follow it)"
+        aria-label="Change project folder"
+        className="ml-auto shrink-0 inline-flex items-center gap-1 px-[6px] h-[18px] rounded-[4px] border border-line bg-surface-2 text-text-dim hover:text-text font-mono text-[10px] disabled:opacity-40"
+      >
+        <Icon name="folder" size={9} />
+        {busy ? "moving…" : "change folder"}
+      </button>
     </div>
   );
 }

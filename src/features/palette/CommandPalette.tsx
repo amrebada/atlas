@@ -20,10 +20,12 @@ const STATIC_ACTIONS: Array<{
     | "clone"
     | "import"
     | "gear"
-    | "term";
+    | "term"
+    | "home";
   label: string;
   keys?: string[];
 }> = [
+  { id: "home", icon: "home", label: "Go to Home", keys: ["⌘", "⇧", "H"] },
   { id: "new", icon: "plus", label: "New project…", keys: ["⌘", "N"] },
   {
     id: "clone",
@@ -213,6 +215,9 @@ export function CommandPalette() {
         action: a,
         onEnter: () => {
           switch (a.id) {
+            case "home":
+              useUiStore.getState().setCollection("home");
+              break;
             case "new":
               openNewProject("new");
               break;

@@ -95,6 +95,12 @@ pub fn default_settings() -> Settings {
 
 /// Load `settings.json`, lazily creating it on first read.
 pub async fn load(app_data_dir: &Path) -> anyhow::Result<Settings> {
+    load_blocking(app_data_dir)
+}
+
+/// Synchronous twin of [`load`] for callers that are not on the async
+/// runtime (the Pilot orchestrator, background threads).
+pub fn load_blocking(app_data_dir: &Path) -> anyhow::Result<Settings> {
     let path = settings_path(app_data_dir);
 
     // Race-free enough: read_json returns None only if the file is

@@ -103,6 +103,12 @@ export const renameProject = (id: string, name: string) =>
 export const setProjectTags = (id: string, tags: string[]) =>
   invoke<void>("projects_set_tags", { id, tags });
 
+/** Re-point a project at a different folder. Ids are derived from the
+ *  path, so the returned project carries a NEW id; callers must swap the
+ *  cache entry (and the selection) rather than patch in place. */
+export const setProjectPath = (id: string, path: string) =>
+  invoke<Project>("projects_set_path", { id, path });
+
 // ---------- watchers ----------
 
 export const listWatchers = () => invoke<WatchRoot[]>("watchers_list");
@@ -659,6 +665,30 @@ export const gitStash = (projectId: string, message: string) =>
 export const gitPush = (projectId: string) =>
   invoke<GitActionResult>("git_push", { projectId });
 
+// One shell step of a sync run. Mirrors `GitSyncStep` in commands/git.rs.
+export interface GitSyncStep {
+  /** `status` | `stash` | `pull` | `rebase-abort` | `push` | `stash-pop`. */
+  name: string;
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+}
+
+// Mirrors `GitSyncResult` in commands/git.rs.
+export interface GitSyncResult {
+  ok: boolean;
+  /** Local changes were stashed before the rebase. */
+  stashed: boolean;
+  /** Stash popped back. `stashed && !stashRestored` → still in `git stash list`. */
+  stashRestored: boolean;
+  summary: string;
+  steps: GitSyncStep[];
+}
+
+/** stash (if dirty) → pull --rebase → push → stash pop. */
+export const gitSync = (projectId: string) =>
+  invoke<GitSyncResult>("git_sync", { projectId });
+
 // Atlas-managed block of `.git/info/exclude` - per-repo ignores that git
 // never commits. Mirrors `LocalExcludes` in commands/git.rs.
 export interface LocalExcludes {
@@ -689,6 +719,119 @@ export const recentsList = (limit = 20) =>
 
 export const recentsPush = (projectId: string) =>
   invoke<void>("recents_push", { projectId });
+
+// ---------- Claude Code hook bridge ----------
+// Mirrors `ClaudeHooksStatus` / `PermissionDecision` in claude_hooks.rs.
+
+export interface ClaudeHooksStatus {
+  /** Both hooks are wired up and the script exists. */
+  installed: boolean;
+  notificationHook: boolean;
+  permissionHook: boolean;
+  scriptPath: string;
+  settingsPath: string;
+}
+
+export type PermissionDecision = "allow" | "deny" | "ask";
+
+export const claudeHooksStatus = () =>
+  invoke<ClaudeHooksStatus>("claude_hooks_status");
+
+/** Write the hook script + register Notification / PermissionRequest hooks
+ *  in `~/.claude/settings.json` (other hooks are preserved). */
+export const claudeHooksInstall = () =>
+  invoke<ClaudeHooksStatus>("claude_hooks_install");
+
+export const claudeHooksUninstall = () =>
+  invoke<ClaudeHooksStatus>("claude_hooks_uninstall");
+
+/** Answer a `claude:permission:request`. `"ask"` hands the decision back
+ *  to Claude Code's own terminal prompt. */
+export const claudePermissionResolve = (
+  id: string,
+  decision: PermissionDecision,
+  message?: string,
+) =>
+  invoke<void>("claude_permission_resolve", {
+    id,
+    decision,
+    message: message ?? null,
+  });
+
+// ---------- home dashboard ----------
+// Mirrors the `Home*` structs in commands/home.rs.
+
+export interface HomeDay {
+  /** Local calendar date `YYYY-MM-DD`. */
+  date: string;
+  commits: number;
+  projects: number;
+  /** Estimated minutes worked (git-hours heuristic). */
+  minutes: number;
+}
+
+export interface HomeCommit {
+  projectId: string;
+  projectName: string;
+  projectColor: string;
+  sha: string;
+  summary: string;
+  /** RFC-3339, local offset. */
+  authoredAt: string;
+  additions?: number;
+  deletions?: number;
+}
+
+export interface HomeProject {
+  projectId: string;
+  name: string;
+  color: string;
+  branch: string;
+  commits7d: number;
+  commits30d: number;
+  minutes7d: number;
+  lastCommitAt?: string;
+  dirty: number;
+  ahead: number;
+  behind: number;
+}
+
+export interface HomeTotals {
+  commitsToday: number;
+  commits7d: number;
+  commits30d: number;
+  activeProjects7d: number;
+  additions7d: number;
+  deletions7d: number;
+  minutesToday: number;
+  minutes7d: number;
+  minutes30d: number;
+  streakDays: number;
+  dirtyProjects: number;
+  aheadProjects: number;
+  behindProjects: number;
+}
+
+export interface HomeDashboard {
+  generatedAt: string;
+  author?: string;
+  rangeDays: number;
+  /** Oldest → newest, `rangeDays` entries. */
+  days: HomeDay[];
+  /** 24 buckets, commits per local hour (last 30d). */
+  hours: number[];
+  /** 7 buckets, Monday first (last 30d). */
+  weekdays: number[];
+  recentCommits: HomeCommit[];
+  projects: HomeProject[];
+  attention: HomeProject[];
+  totals: HomeTotals;
+}
+
+/** Cross-project activity analytics for the Home page. `days` is clamped
+ *  to 7..=365 on the Rust side (default 84 = 12 weeks). */
+export const homeDashboard = (days = 84) =>
+  invoke<HomeDashboard>("home_dashboard", { days });
 
 // ---------- system ----------
 

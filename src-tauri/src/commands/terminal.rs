@@ -3,14 +3,27 @@
 use tauri::State;
 
 use crate::storage::types::PaneId;
+use crate::storage::AppContext;
 use crate::terminal::{OpenRequest, PaneDto, TerminalManager};
 
-/// `terminal.open` - spawn a new PTY pane.
+/// `terminal.open` - spawn a new PTY pane. `claude` launches pick up the
+/// configured `--permission-mode` (Settings → Providers) here so every
+/// entry point (new session, resume, launch templates, skills) agrees.
 #[tauri::command]
 pub async fn terminal_open(
     state: State<'_, TerminalManager>,
-    req: OpenRequest,
+    ctx: State<'_, AppContext>,
+    mut req: OpenRequest,
 ) -> Result<PaneId, String> {
+    match crate::storage::settings::load(&ctx.app_data_dir).await {
+        Ok(settings) => crate::providers::claude::inject_permission_mode(
+            &mut req,
+            settings.providers.claude_permission_mode,
+        ),
+        Err(e) => {
+            tracing::warn!(error = %e, "terminal_open: settings load failed; no permission mode")
+        }
+    }
     state.open(req).map_err(|e| e.to_string())
 }
 

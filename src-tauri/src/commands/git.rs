@@ -10,6 +10,7 @@ use tokio::process::Command;
 use ts_rs::TS;
 
 use crate::storage::Db;
+use crate::watcher::WatcherManager;
 
 /// A single row returned by `git_branch_list`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -118,10 +119,22 @@ pub async fn git_stash(
 
 /// `git.push` - push the current branch to its tracked upstream. If no
 #[tauri::command]
-pub async fn git_push(state: State<'_, Db>, project_id: String) -> Result<GitActionResult, String> {
+pub async fn git_push(
+    state: State<'_, Db>,
+    watcher: State<'_, WatcherManager>,
+    project_id: String,
+) -> Result<GitActionResult, String> {
     let cwd = resolve_project_path(&state, &project_id).await?;
+    let out = push_current(&cwd).await?;
+    watcher.refresh_git_status_for(cwd);
+    Ok(out)
+}
+
+/// `git push`, falling back to `git push -u origin <branch>` when the
+/// current branch has no upstream yet (fresh local branch).
+async fn push_current(cwd: &Path) -> Result<GitActionResult, String> {
     // First attempt: plain `git push` (uses configured upstream).
-    let first = run_git(&cwd, &["push"]).await?;
+    let first = run_git(cwd, &["push"]).await?;
     if first.ok {
         return Ok(first);
     }
@@ -132,11 +145,226 @@ pub async fn git_push(state: State<'_, Db>, project_id: String) -> Result<GitAct
     if !needs_upstream {
         return Ok(first);
     }
-    let branch = match current_branch_name(&cwd) {
+    let branch = match current_branch_name(cwd) {
         Some(b) => b,
         None => return Ok(first),
     };
-    run_git(&cwd, &["push", "-u", "origin", &branch]).await
+    run_git(cwd, &["push", "-u", "origin", &branch]).await
+}
+
+/// One shell step of a `git_sync` run, in execution order.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct GitSyncStep {
+    /// `status` | `stash` | `pull` | `rebase-abort` | `push` | `stash-pop`.
+    pub name: String,
+    pub ok: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Outcome of `git_sync`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub struct GitSyncResult {
+    /// True only when every step that ran succeeded.
+    pub ok: bool,
+    /// Local changes were stashed before the rebase.
+    pub stashed: bool,
+    /// The stash was popped back onto the working tree. When `stashed` is
+    /// true and this is false, the changes are still in `git stash list`.
+    pub stash_restored: bool,
+    /// One-line human summary for the toast.
+    pub summary: String,
+    pub steps: Vec<GitSyncStep>,
+}
+
+/// `git.sync` - bring the current branch in line with its upstream and
+/// publish local commits in one go:
+///
+/// 1. `git stash push -u` when the working tree is dirty,
+/// 2. `git pull --rebase` (aborting the rebase on conflict so the tree is
+///    left exactly as it was),
+/// 3. `git push` (setting upstream if needed),
+/// 4. `git stash pop` to re-apply step 1.
+#[tauri::command]
+pub async fn git_sync(
+    state: State<'_, Db>,
+    watcher: State<'_, WatcherManager>,
+    project_id: String,
+) -> Result<GitSyncResult, String> {
+    let cwd = resolve_project_path(&state, &project_id).await?;
+    let result = sync_repo(&cwd).await?;
+    watcher.refresh_git_status_for(cwd);
+    Ok(result)
+}
+
+const SYNC_STASH_MESSAGE: &str = "atlas: sync autostash";
+
+pub(crate) async fn sync_repo(cwd: &Path) -> Result<GitSyncResult, String> {
+    let mut steps: Vec<GitSyncStep> = Vec::new();
+
+    // ---- 1. dirty check -------------------------------------------------
+    let status = run_git(cwd, &["status", "--porcelain", "--untracked-files=all"]).await?;
+    let status_ok = status.ok;
+    let dirty = status_ok && !status.stdout.trim().is_empty();
+    steps.push(step("status", &status));
+    if !status_ok {
+        return Ok(finish(
+            false,
+            false,
+            false,
+            format!("git status failed: {}", tail(&status)),
+            steps,
+        ));
+    }
+
+    let mut stashed = false;
+    if dirty {
+        let stash = run_git(cwd, &["stash", "push", "-u", "-m", SYNC_STASH_MESSAGE]).await?;
+        let stash_ok = stash.ok;
+        // `git stash push` exits 0 with "No local changes to save" when the
+        // only dirt is something it won't stash; don't pop in that case.
+        stashed = stash_ok && !stash.stdout.contains("No local changes to save");
+        steps.push(step("stash", &stash));
+        if !stash_ok {
+            return Ok(finish(
+                false,
+                false,
+                false,
+                format!("couldn't stash local changes: {}", tail(&stash)),
+                steps,
+            ));
+        }
+    }
+
+    // ---- 2. pull --rebase -----------------------------------------------
+    let mut pull = run_git(cwd, &["pull", "--rebase"]).await?;
+    if !pull.ok && pull.stderr.contains("no tracking information") {
+        if let Some(branch) = current_branch_name(cwd) {
+            pull = run_git(cwd, &["pull", "--rebase", "origin", &branch]).await?;
+        }
+    }
+    let pull_ok = pull.ok;
+    let pull_tail = tail(&pull);
+    steps.push(step("pull", &pull));
+    if !pull_ok {
+        if rebase_in_progress(cwd).await {
+            let abort = run_git(cwd, &["rebase", "--abort"]).await?;
+            steps.push(step("rebase-abort", &abort));
+        }
+        let restored = if stashed {
+            pop_stash(cwd, &mut steps).await?
+        } else {
+            false
+        };
+        let mut summary = format!("pull --rebase failed: {pull_tail}");
+        if stashed && !restored {
+            summary.push_str(" · your changes are kept in `git stash list`");
+        }
+        return Ok(finish(false, stashed, restored, summary, steps));
+    }
+
+    // ---- 3. push --------------------------------------------------------
+    let push = push_current(cwd).await?;
+    let push_ok = push.ok;
+    let push_tail = tail(&push);
+    steps.push(step("push", &push));
+
+    // ---- 4. restore stash -----------------------------------------------
+    let restored = if stashed {
+        pop_stash(cwd, &mut steps).await?
+    } else {
+        false
+    };
+
+    let ok = push_ok && (!stashed || restored);
+    let mut summary = if push_ok {
+        "Synced: pulled with rebase and pushed".to_string()
+    } else {
+        format!("pulled with rebase, but push failed: {push_tail}")
+    };
+    if stashed {
+        summary.push_str(if restored {
+            " · local changes re-applied"
+        } else {
+            " · stash pop conflicted; your changes are in `git stash list`"
+        });
+    }
+    Ok(finish(ok, stashed, restored, summary, steps))
+}
+
+async fn pop_stash(cwd: &Path, steps: &mut Vec<GitSyncStep>) -> Result<bool, String> {
+    let pop = run_git(cwd, &["stash", "pop"]).await?;
+    let ok = pop.ok;
+    steps.push(step("stash-pop", &pop));
+    Ok(ok)
+}
+
+/// True when `.git/rebase-merge` or `.git/rebase-apply` exists (resolved
+/// through `git rev-parse --git-path` so linked worktrees work too).
+async fn rebase_in_progress(cwd: &Path) -> bool {
+    for dir in ["rebase-merge", "rebase-apply"] {
+        if let Ok(out) = run_git(cwd, &["rev-parse", "--git-path", dir]).await {
+            let rel = out.stdout.trim();
+            if !rel.is_empty() {
+                let p = PathBuf::from(rel);
+                let abs = if p.is_absolute() { p } else { cwd.join(p) };
+                if abs.exists() {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn step(name: &str, r: &GitActionResult) -> GitSyncStep {
+    GitSyncStep {
+        name: name.to_string(),
+        ok: r.ok,
+        stdout: r.stdout.clone(),
+        stderr: r.stderr.clone(),
+    }
+}
+
+fn finish(
+    ok: bool,
+    stashed: bool,
+    stash_restored: bool,
+    summary: String,
+    steps: Vec<GitSyncStep>,
+) -> GitSyncResult {
+    GitSyncResult {
+        ok,
+        stashed,
+        stash_restored,
+        summary,
+        steps,
+    }
+}
+
+/// Last non-empty line of stderr (falling back to stdout) for toasts.
+fn tail(r: &GitActionResult) -> String {
+    let pick = |s: &str| {
+        s.lines()
+            .map(str::trim)
+            .rfind(|l| !l.is_empty())
+            .map(str::to_string)
+    };
+    pick(&r.stderr)
+        .or_else(|| pick(&r.stdout))
+        .unwrap_or_else(|| "unknown error".to_string())
 }
 
 /// Snapshot of the Atlas-managed local-exclude state for a project. Backs
@@ -501,6 +729,137 @@ mod tests {
             .as_deref()
             .unwrap_or("")
             .contains("uncommitted"));
+        Ok(())
+    }
+
+    // ---- git_sync -------------------------------------------------------
+
+    /// Run `git` with the given args in `cwd`, panicking on failure.
+    fn sh(cwd: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "Atlas Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Atlas Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .output()
+            .expect("spawn git");
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// Bare remote + two clones (`a` publishes, `b` is the repo under test)
+    /// sharing one commit on `main`.
+    fn sync_fixture(tag: &str) -> anyhow::Result<(TmpDir, PathBuf, PathBuf, PathBuf)> {
+        let tmp = TmpDir::new(tag)?;
+        let remote = tmp.0.join("remote.git");
+        let a = tmp.0.join("a");
+        let b = tmp.0.join("b");
+        sh(&tmp.0, &["init", "--bare", "-q", remote.to_str().unwrap()]);
+        sh(
+            &tmp.0,
+            &["clone", "-q", remote.to_str().unwrap(), a.to_str().unwrap()],
+        );
+        sh(&a, &["checkout", "-q", "-b", "main"]);
+        fs::write(a.join("shared.txt"), "v1\n")?;
+        sh(&a, &["add", "-A"]);
+        sh(&a, &["commit", "-q", "-m", "init"]);
+        sh(&a, &["push", "-q", "-u", "origin", "main"]);
+        sh(
+            &tmp.0,
+            &["clone", "-q", remote.to_str().unwrap(), b.to_str().unwrap()],
+        );
+        Ok((tmp, remote, a, b))
+    }
+
+    #[tokio::test]
+    async fn sync_stashes_rebases_pushes_and_restores() -> anyhow::Result<()> {
+        let (_tmp, remote, a, b) = sync_fixture("sync-ok")?;
+
+        // Upstream moves ahead.
+        fs::write(a.join("upstream.txt"), "from a\n")?;
+        sh(&a, &["add", "-A"]);
+        sh(&a, &["commit", "-q", "-m", "upstream"]);
+        sh(&a, &["push", "-q"]);
+
+        // Local commit + dirty tracked file + untracked file in `b`.
+        fs::write(b.join("local.txt"), "from b\n")?;
+        sh(&b, &["add", "-A"]);
+        sh(&b, &["commit", "-q", "-m", "local"]);
+        fs::write(b.join("shared.txt"), "v1\nwip\n")?;
+        fs::write(b.join("scratch.txt"), "untracked\n")?;
+
+        let res = sync_repo(&b).await.map_err(|e| anyhow::anyhow!(e))?;
+        assert!(res.ok, "{res:?}");
+        assert!(res.stashed);
+        assert!(res.stash_restored);
+
+        // Remote has both commits, local is in sync with it.
+        let remote_log = sh(&remote, &["log", "--oneline", "main"]);
+        assert_eq!(remote_log.lines().count(), 3, "{remote_log}");
+        let counts = sh(
+            &b,
+            &["rev-list", "--left-right", "--count", "HEAD...origin/main"],
+        );
+        assert_eq!(counts.trim(), "0\t0", "{counts}");
+
+        // Working-tree changes survived.
+        assert_eq!(fs::read_to_string(b.join("shared.txt"))?, "v1\nwip\n");
+        assert!(b.join("scratch.txt").exists());
+        assert!(b.join("upstream.txt").exists());
+        let stash = sh(&b, &["stash", "list"]);
+        assert!(stash.trim().is_empty(), "stash should be popped: {stash}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sync_aborts_rebase_on_conflict_and_restores_stash() -> anyhow::Result<()> {
+        let (_tmp, _remote, a, b) = sync_fixture("sync-conflict")?;
+
+        fs::write(a.join("shared.txt"), "v2 from a\n")?;
+        sh(&a, &["commit", "-q", "-am", "a edits shared"]);
+        sh(&a, &["push", "-q"]);
+
+        fs::write(b.join("shared.txt"), "v2 from b\n")?;
+        sh(&b, &["commit", "-q", "-am", "b edits shared"]);
+        let local_head = sh(&b, &["rev-parse", "HEAD"]);
+        fs::write(b.join("notes.txt"), "dirty\n")?;
+
+        let res = sync_repo(&b).await.map_err(|e| anyhow::anyhow!(e))?;
+        assert!(!res.ok);
+        assert!(res.stashed);
+        assert!(res.stash_restored, "{res:?}");
+        assert!(
+            res.summary.contains("pull --rebase failed"),
+            "{}",
+            res.summary
+        );
+        assert!(res.steps.iter().any(|s| s.name == "rebase-abort" && s.ok));
+        assert!(!res.steps.iter().any(|s| s.name == "push"));
+
+        // Tree is exactly as before: same HEAD, no rebase in flight, dirt back.
+        assert_eq!(sh(&b, &["rev-parse", "HEAD"]), local_head);
+        assert!(!rebase_in_progress(&b).await);
+        assert!(b.join("notes.txt").exists());
+        assert_eq!(fs::read_to_string(b.join("shared.txt"))?, "v2 from b\n");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sync_clean_tree_skips_stash() -> anyhow::Result<()> {
+        let (_tmp, _remote, _a, b) = sync_fixture("sync-clean")?;
+        let res = sync_repo(&b).await.map_err(|e| anyhow::anyhow!(e))?;
+        assert!(res.ok, "{res:?}");
+        assert!(!res.stashed);
+        assert!(!res.steps.iter().any(|s| s.name == "stash"));
+        assert!(res.steps.iter().any(|s| s.name == "push" && s.ok));
         Ok(())
     }
 }

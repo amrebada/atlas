@@ -59,6 +59,21 @@ export type ChatMessage = {
 role: string, text: string, };
 
 /**
+ * Snapshot of the integration for the settings UI.
+ */
+export type ClaudeHooksStatus = { 
+/**
+ * Both hooks are wired up and the script exists.
+ */
+installed: boolean, notificationHook: boolean, permissionHook: boolean, scriptPath: string, settingsPath: string, };
+
+/**
+ * Claude Code `--permission-mode` values. Serialized exactly as the CLI
+ * spells them so the frontend can show/send the raw value.
+ */
+export type ClaudePermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
+
+/**
  * One installed Claude Code skill (user, project, or plugin scope).
  */
 export type ClaudeSkill = { 
@@ -295,6 +310,37 @@ export type GitPollInterval = "10s" | "30s" | "1m" | "off";
 export type GitSettings = { pollInterval: GitPollInterval, showAuthor: boolean, defaultCloneDepth: CloneDepth, sshKey: string, };
 
 /**
+ * Outcome of `git_sync`.
+ */
+export type GitSyncResult = { 
+/**
+ * True only when every step that ran succeeded.
+ */
+ok: boolean, 
+/**
+ * Local changes were stashed before the rebase.
+ */
+stashed: boolean, 
+/**
+ * The stash was popped back onto the working tree. When `stashed` is
+ * true and this is false, the changes are still in `git stash list`.
+ */
+stashRestored: boolean, 
+/**
+ * One-line human summary for the toast.
+ */
+summary: string, steps: Array<GitSyncStep>, };
+
+/**
+ * One shell step of a `git_sync` run, in execution order.
+ */
+export type GitSyncStep = { 
+/**
+ * `status` | `stash` | `pull` | `rebase-abort` | `push` | `stash-pop`.
+ */
+name: string, ok: boolean, stdout: string, stderr: string, };
+
+/**
  * Goal definition attached to a Routine. The TypeScript shape is a
  * discriminated union on `kind`.
  */
@@ -317,6 +363,64 @@ ts: string, kind: HistoryKind, summary: string, files: Array<string>, rationale:
  * Kind of a `history.jsonl` entry.
  */
 export type HistoryKind = "task" | "mod" | "question" | "epic";
+
+export type HomeCommit = { projectId: string, projectName: string, projectColor: string, 
+/**
+ * Short (7-char) sha.
+ */
+sha: string, summary: string, 
+/**
+ * RFC-3339 in local time.
+ */
+authoredAt: string, additions: number | null, deletions: number | null, };
+
+export type HomeDashboard = { generatedAt: string, 
+/**
+ * Git identity the commits were filtered by (`None` → every author).
+ */
+author: string | null, rangeDays: number, 
+/**
+ * Oldest → newest, exactly `range_days` entries.
+ */
+days: Array<HomeDay>, 
+/**
+ * Commits per local hour-of-day over the last 30 days (24 buckets).
+ */
+hours: Array<number>, 
+/**
+ * Commits per weekday over the last 30 days, Monday first (7 buckets).
+ */
+weekdays: Array<number>, recentCommits: Array<HomeCommit>, 
+/**
+ * Projects with activity in the window, most active first.
+ */
+projects: Array<HomeProject>, 
+/**
+ * Projects that are dirty / ahead / behind, most urgent first.
+ */
+attention: Array<HomeProject>, totals: HomeTotals, };
+
+export type HomeDay = { 
+/**
+ * Local calendar date, `YYYY-MM-DD`.
+ */
+date: string, commits: number, 
+/**
+ * Distinct projects committed to that day.
+ */
+projects: number, 
+/**
+ * Estimated minutes worked (see module docs).
+ */
+minutes: number, };
+
+export type HomeProject = { projectId: string, name: string, color: string, branch: string, commits7d: number, commits30d: number, minutes7d: number, lastCommitAt: string | null, dirty: number, ahead: number, behind: number, };
+
+export type HomeTotals = { commitsToday: number, commits7d: number, commits30d: number, activeProjects7d: number, additions7d: number, deletions7d: number, minutesToday: number, minutes7d: number, minutes30d: number, 
+/**
+ * Consecutive days (ending today or yesterday) with ≥1 commit.
+ */
+streakDays: number, dirtyProjects: number, aheadProjects: number, behindProjects: number, };
 
 export type Lang = "TypeScript" | "JavaScript" | "Rust" | "Go" | "Python" | "Swift" | "Kotlin" | "Ruby" | "Java" | "C" | "C++" | "Other";
 
@@ -470,6 +574,11 @@ export type PaneSnapshot = { id: string,
 kind: string, title: string, cwd: string, scriptId: string | null, sessionId: string | null, };
 
 export type PaneStatus = "idle" | "running" | "active" | "error";
+
+/**
+ * A decision for a pending `PermissionRequest`.
+ */
+export type PermissionDecision = "allow" | "deny" | "ask";
 
 /**
  * Everything the Pilot window renders for one project.
@@ -648,7 +757,13 @@ enabled: { [key in string]?: boolean },
 /**
  * Provider id used by the "+ new session" main click.
  */
-defaultId: string, };
+defaultId: string, 
+/**
+ * `--permission-mode` passed to every `claude` session Atlas launches
+ * (terminal, resume, launch templates, Pilot). `Default` passes
+ * nothing so Claude Code's own setting applies.
+ */
+claudePermissionMode: ClaudePermissionMode, };
 
 /**
  * Argv + cwd a Tauri command should hand to the terminal pane / shell.

@@ -19,6 +19,9 @@ import { useMcpPaneEvents } from "./features/mcp/usePaneEvents";
 import { TerminalStrip } from "./features/terminal/TerminalStrip";
 import { TodayView } from "./features/planner/TodayView";
 import { TimelineView } from "./features/planner/TimelineView";
+import { HomeView } from "./features/home/HomeView";
+import { ClaudePermissionDialog } from "./features/claude-hooks/ClaudePermissionDialog";
+import { useClaudeNotifications } from "./features/claude-hooks/useClaudeNotifications";
 import { useTopPriorityNotification } from "./features/planner/useTopPriorityNotification";
 import { useAutoUpdate } from "./features/updater/useAutoUpdate";
 import { useTerminalStore } from "./features/terminal/layout";
@@ -86,6 +89,10 @@ function AppInner() {
 
   // Auto-update — checks the GitHub Releases manifest once at launch.
   useAutoUpdate();
+
+  // Claude Code hook bridge — toasts + macOS banners for Claude Code's
+  // Notification hook (permission needed / waiting for input).
+  useClaudeNotifications();
 
   // Hydrate the Zustand UI store from persisted settings. The store is
   const setTheme = useUiStore((s) => s.setTheme);
@@ -159,7 +166,9 @@ function AppInner() {
   // Resolve a user-friendly label for the current collection. Custom
   const collections = useUiStore((s) => s.collections);
   const collectionLabel =
-    collection === "all"
+    collection === "home"
+      ? "Home"
+      : collection === "all"
       ? "All Projects"
       : collection === "pinned"
         ? "Pinned"
@@ -213,6 +222,8 @@ function AppInner() {
         <div className="flex flex-col border-r border-line overflow-hidden min-w-0">
           {showOnboarding ? (
             <OnboardingEmpty />
+          ) : collection === "home" ? (
+            <HomeView projects={projects} />
           ) : (
             <>
               <CenterHeader
@@ -279,6 +290,8 @@ function AppInner() {
       <BulkActionBar projects={projects} />
       <CheatSheetOverlay />
       <McpApprovalDialog />
+      {/* Claude Code PermissionRequest hook → Allow / Deny from Atlas. */}
+      <ClaudePermissionDialog />
 
       {/* Planner: full-screen Today modal. The TitleBar's TodayBadge
           opens it; ⌘T toggles it. Renders `null` when closed. */}
@@ -311,7 +324,8 @@ function filterProjects(
   tag: string | null,
 ): Project[] {
   let out: Project[];
-  if (collection === "all") out = projects.filter((p) => !p.archived);
+  if (collection === "all" || collection === "home")
+    out = projects.filter((p) => !p.archived);
   else if (collection === "pinned")
     out = projects.filter((p) => p.pinned && !p.archived);
   else if (collection === "archive") out = projects.filter((p) => p.archived);

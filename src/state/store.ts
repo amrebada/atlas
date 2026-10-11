@@ -9,7 +9,8 @@ export type Density = "comfortable" | "dense" | "compact";
 export type Font = "plex" | "inter" | "grotesk" | "system";
 export type ViewMode = "list" | "grid";
 export type SortKey = "recent" | "name" | "size" | "branch";
-export type Collection = "all" | "pinned" | "archive" | string;
+/** `"home"` is the analytics landing page; the rest filter the project list. */
+export type Collection = "home" | "all" | "pinned" | "archive" | string;
 
 /** Inspector tab ids - stay aligned with `Inspector/TabStrip.tsx`. */
 export type InspectorTab =
@@ -169,7 +170,7 @@ export const useUiStore = create<UiState>((set) => ({
   sidebarWidth: 220,
   onboarding: false,
   selectedProjectId: null,
-  collection: "all",
+  collection: "home",
   sort: "recent",
   selectedTag: null,
   activeInspectorTab: "overview",

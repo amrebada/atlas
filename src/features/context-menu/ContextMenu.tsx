@@ -18,6 +18,8 @@ import {
 } from "../../ipc";
 import { useUiStore } from "../../state/store";
 import { useTerminalStore, makePane } from "../../features/terminal/layout";
+import { useGitSync } from "../git-sync/useGitSync";
+import { useChangeProjectFolder } from "../project-folder/useChangeProjectFolder";
 import type { BranchInfo } from "../../ipc";
 import type { Collection, Project } from "../../types";
 
@@ -31,6 +33,8 @@ type ActionId =
   | "rename"
   | "tag"
   | "checkout"
+  | "sync"
+  | "set-path"
   | "add-collection"
   | "remove-collection"
   | "select-multi"
@@ -57,6 +61,8 @@ export function ContextMenu({ projects }: { projects: Project[] }) {
   const startMultiSelect = useUiStore((s) => s.startMultiSelect);
   const queryClient = useQueryClient();
 
+  const syncMut = useGitSync();
+  const { changeFolder } = useChangeProjectFolder();
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [collectionMenuOpen, setCollectionMenuOpen] = useState(false);
@@ -176,6 +182,13 @@ export function ContextMenu({ projects }: { projects: Project[] }) {
     { id: "tag", icon: "tag", label: "Add tag…", keys: ["T"] },
     { id: "checkout", icon: "branch", label: "Checkout branch…", submenu: true },
     {
+      id: "sync",
+      icon: "sync",
+      label:
+        project.dirty > 0 ? "Sync (stash · pull --rebase · push)" : "Sync (pull --rebase · push)",
+    },
+    { id: "set-path", icon: "folder", label: "Change folder…" },
+    {
       id: "add-collection",
       icon: "folder",
       label: "Add to collection…",
@@ -262,6 +275,12 @@ export function ContextMenu({ projects }: { projects: Project[] }) {
       case "checkout":
         setBranchMenuOpen(true);
         return; // don't close menu yet
+      case "sync":
+        syncMut.mutate(project.id);
+        break;
+      case "set-path":
+        void changeFolder(project);
+        break;
       case "add-collection":
         setCollectionMenuOpen(true);
         return; // don't close menu yet
@@ -288,7 +307,7 @@ export function ContextMenu({ projects }: { projects: Project[] }) {
 
   // Clamp coords so the menu stays on-screen. 240px wide × ~340px tall is a
   const MENU_W = 240;
-  const MENU_H = 340;
+  const MENU_H = 400;
   const pad = 8;
   const left = Math.min(menu.x, window.innerWidth - MENU_W - pad);
   const top = Math.min(menu.y, window.innerHeight - MENU_H - pad);

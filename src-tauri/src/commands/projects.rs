@@ -171,6 +171,70 @@ pub async fn projects_rename(
         .map_err(|e: anyhow::Error| e.to_string())
 }
 
+/// `projects.set_path` - re-point a project at a different folder on
+/// disk. Because ids are derived from the path, the project comes back
+/// under a **new id**; the frontend swaps its cache entry and selection.
+/// Emits `project:removed(old)` + `project:discovered(new)` and queues a
+/// git-status + metrics refresh for the new folder.
+#[tauri::command]
+pub async fn projects_set_path(
+    db: tauri::State<'_, Db>,
+    watcher: tauri::State<'_, WatcherManager>,
+    app: tauri::AppHandle,
+    id: String,
+    path: String,
+) -> Result<Project, String> {
+    let new_path = PathBuf::from(path.trim());
+    if !new_path.is_absolute() {
+        return Err("folder path must be absolute".into());
+    }
+    if !new_path.is_dir() {
+        return Err(format!("not a directory: {}", new_path.display()));
+    }
+
+    let project = db
+        .set_project_path(&id, &new_path)
+        .await
+        .map_err(|e: anyhow::Error| e.to_string())?;
+
+    if project.id != id {
+        if let Err(e) = events::emit_project_removed(&app, &id) {
+            tracing::warn!(error = %e, id = %id, "emit project:removed failed");
+        }
+    }
+    if let Err(e) = events::emit_project_discovered(&app, &project) {
+        tracing::warn!(error = %e, id = %project.id, "emit project:discovered failed");
+    }
+
+    // Catch the index up with the new folder in the background.
+    watcher.refresh_git_status_for(PathBuf::from(&project.path));
+    {
+        let db = db.inner().clone();
+        let app = app.clone();
+        let pid = project.id.clone();
+        tauri::async_runtime::spawn(async move {
+            match db.refresh_project_metrics(&pid).await {
+                Ok(m) => {
+                    let _ = events::emit_project_updated(
+                        &app,
+                        &pid,
+                        serde_json::json!({
+                            "loc": m.loc,
+                            "sizeBytes": m.size_bytes,
+                            "size": crate::util::format_bytes(m.size_bytes),
+                            "diskBytes": m.disk_bytes,
+                            "diskSize": crate::util::format_bytes(m.disk_bytes),
+                        }),
+                    );
+                }
+                Err(e) => tracing::warn!(error = %e, id = %pid, "metrics after set_path"),
+            }
+        });
+    }
+
+    Ok(project)
+}
+
 /// `projects.set_tags` - replace the full tag set for a project.
 #[tauri::command]
 pub async fn projects_set_tags(

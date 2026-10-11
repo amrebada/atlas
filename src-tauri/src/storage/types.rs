@@ -576,6 +576,11 @@ pub struct ProvidersSettings {
     pub enabled: std::collections::HashMap<String, bool>,
     /// Provider id used by the "+ new session" main click.
     pub default_id: String,
+    /// `--permission-mode` passed to every `claude` session Atlas launches
+    /// (terminal, resume, launch templates, Pilot). `Default` passes
+    /// nothing so Claude Code's own setting applies.
+    #[serde(default)]
+    pub claude_permission_mode: ClaudePermissionMode,
 }
 
 impl Default for ProvidersSettings {
@@ -587,6 +592,40 @@ impl Default for ProvidersSettings {
         Self {
             enabled,
             default_id: "claude".into(),
+            claude_permission_mode: ClaudePermissionMode::Default,
+        }
+    }
+}
+
+/// Claude Code `--permission-mode` values. Serialized exactly as the CLI
+/// spells them so the frontend can show/send the raw value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../src/types/rust.ts",
+    rename_all = "camelCase"
+)]
+pub enum ClaudePermissionMode {
+    /// Don't pass a flag; Claude Code prompts as usual.
+    #[default]
+    Default,
+    /// Auto-accept file edits, still prompt for commands.
+    AcceptEdits,
+    /// Read-only planning mode.
+    Plan,
+    /// Skip every permission prompt (`bypassPermissions`).
+    BypassPermissions,
+}
+
+impl ClaudePermissionMode {
+    /// CLI spelling, or `None` for [`Self::Default`].
+    pub fn cli_value(self) -> Option<&'static str> {
+        match self {
+            Self::Default => None,
+            Self::AcceptEdits => Some("acceptEdits"),
+            Self::Plan => Some("plan"),
+            Self::BypassPermissions => Some("bypassPermissions"),
         }
     }
 }

@@ -35,6 +35,7 @@ import {
   type GitActionResult,
 } from "../../../ipc";
 import { useUiStore } from "../../../state/store";
+import { useGitSync } from "../../../features/git-sync/useGitSync";
 import type { FileNode, Project, FileStatus } from "../../../types";
 
 // Atlas - Inspector / Files tab.
@@ -85,6 +86,7 @@ export function Files({ project }: FilesProps) {
     onSuccess: (res) => onActionSuccess("stash", res),
     onError: (err) => pushToast("error", `Stash failed: ${String(err)}`),
   });
+  const syncMut = useGitSync();
   const pushMut = useMutation({
     mutationFn: () => gitPush(project.id),
     onSuccess: (res) => onActionSuccess("push", res),
@@ -251,6 +253,20 @@ export function Files({ project }: FilesProps) {
           className="px-[8px] py-[3px] font-mono text-[10px] bg-accent text-accent-fg rounded-[3px] font-semibold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           commit
+        </button>
+        <button
+          type="button"
+          onClick={() => syncMut.mutate(project.id)}
+          disabled={syncMut.isPending}
+          title={
+            counts.changed > 0
+              ? "Sync: stash → pull --rebase → push → stash pop"
+              : "Sync: pull --rebase → push"
+          }
+          aria-label="Sync with remote"
+          className="inline-flex items-center justify-center w-[24px] h-[22px] rounded-[3px] border border-line text-text hover:bg-row-active disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Icon name="sync" size={12} />
         </button>
         <button
           type="button"

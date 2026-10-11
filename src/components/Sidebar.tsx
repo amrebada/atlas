@@ -127,6 +127,12 @@ export function Sidebar({ projects }: SidebarProps) {
         }
       />
       <NavItem
+        label="Home"
+        icon={<Icon name="home" size={13} />}
+        active={collection === "home"}
+        onClick={() => setCollection("home")}
+      />
+      <NavItem
         label="All Projects"
         icon={<Icon name="folder" size={13} />}
         count={nonArchivedCount}
@@ -1349,7 +1355,8 @@ function NavItem({
 }: {
   label: string;
   icon: React.ReactNode;
-  count: number;
+  /** Omit to hide the trailing counter (e.g. Home). */
+  count?: number;
   active: boolean;
   onClick: () => void;
 }) {
@@ -1357,7 +1364,7 @@ function NavItem({
     <button
       type="button"
       onClick={onClick}
-      aria-label={`${label} (${count})`}
+      aria-label={count == null ? label : `${label} (${count})`}
       aria-pressed={active}
       className="flex items-center gap-2 h-[var(--sidebar-row-h,28px)] px-[10px] mx-[6px] rounded-[5px] cursor-pointer w-auto text-left"
       style={{
@@ -1373,7 +1380,9 @@ function NavItem({
       >
         {label}
       </span>
-      <span className="font-mono text-[10px] text-text-dimmer">{count}</span>
+      {count != null && (
+        <span className="font-mono text-[10px] text-text-dimmer">{count}</span>
+      )}
     </button>
   );
 }

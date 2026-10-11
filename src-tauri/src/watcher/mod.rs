@@ -172,6 +172,14 @@ impl WatcherManager {
         });
     }
 
+    /// Queue a git-status scan for one repo and emit `git:status` for it.
+    /// Used after mutating git actions (sync / push) and after a project is
+    /// re-pointed at a new folder, so the index catches up without waiting
+    /// for a filesystem event.
+    pub fn refresh_git_status_for(&self, repo_root: PathBuf) {
+        self.spawn_git_status(repo_root);
+    }
+
     /// Variant that emits `discovery:progress` events keyed by `root`
     pub fn refresh_git_status_under(&self, root: PathBuf) {
         let db = self.db.clone();

@@ -72,6 +72,70 @@ struct DiscoveryProgressPayload<'a> {
     total: Option<usize>,
 }
 
+/// Payload of `claude:notification` - Claude Code's `Notification` hook
+/// relayed through the hook bridge.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeNotificationPayload {
+    pub id: String,
+    pub project_id: Option<String>,
+    pub project_name: Option<String>,
+    pub cwd: String,
+    pub session_id: String,
+    pub message: String,
+    pub title: Option<String>,
+    /// `permission_prompt` | `idle_prompt` | … (see Claude Code docs).
+    pub notification_type: Option<String>,
+}
+
+/// Payload of `claude:permission:request` - Claude Code's
+/// `PermissionRequest` hook awaiting an Allow / Deny from the UI.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudePermissionPayload {
+    pub id: String,
+    pub project_id: Option<String>,
+    pub project_name: Option<String>,
+    pub cwd: String,
+    pub session_id: String,
+    pub tool_name: String,
+    pub tool_input: Value,
+    pub permission_mode: Option<String>,
+    /// Seconds until the hook gives up and Claude Code prompts itself.
+    pub expires_in_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ClaudePermissionCancelledPayload<'a> {
+    id: &'a str,
+}
+
+pub fn emit_claude_notification(
+    app: &AppHandle,
+    payload: &ClaudeNotificationPayload,
+) -> anyhow::Result<()> {
+    app.emit("claude:notification", payload)
+        .map_err(|e| anyhow::anyhow!("emit claude:notification: {e}"))
+}
+
+pub fn emit_claude_permission_request(
+    app: &AppHandle,
+    payload: &ClaudePermissionPayload,
+) -> anyhow::Result<()> {
+    app.emit("claude:permission:request", payload)
+        .map_err(|e| anyhow::anyhow!("emit claude:permission:request: {e}"))
+}
+
+/// Emit `claude:permission:cancelled { id }` when the hook's wait window
+/// elapsed without a decision.
+pub fn emit_claude_permission_cancelled(app: &AppHandle, id: &str) -> anyhow::Result<()> {
+    app.emit(
+        "claude:permission:cancelled",
+        ClaudePermissionCancelledPayload { id },
+    )
+    .map_err(|e| anyhow::anyhow!("emit claude:permission:cancelled: {e}"))
+}
+
 /// Emit `project:updated { id, patch }`.
 pub fn emit_project_updated(app: &AppHandle, id: &str, patch: Value) -> anyhow::Result<()> {
     app.emit("project:updated", ProjectUpdatedPayload { id, patch })

@@ -1,12 +1,14 @@
 //! Command handlers exposed to the frontend via `tauri::invoke`.
 
+pub mod agent;
+pub mod claude_hooks;
 pub mod clipboard;
 pub mod collections;
 pub mod disk;
 pub mod editors;
-pub mod agent;
 pub mod files;
 pub mod git;
+pub mod home;
 pub mod ics;
 pub mod launch_templates;
 pub mod mcp;
